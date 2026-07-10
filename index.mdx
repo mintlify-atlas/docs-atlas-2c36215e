@@ -1,20 +1,106 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "MaternaQA-es: Spanish Maternal Healthcare Q&A Dataset"
+sidebarTitle: "Home"
+description: "MaternaQA-es is a public Spanish-language dataset of 5,727 clinical Q&A pairs for LLM fine-tuning, RAG evaluation, and NLP research on maternal and perinatal care."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+MaternaQA-es is an open research resource for training and evaluating language models on clinical questions about pregnancy, childbirth, postpartum care, and perinatal medicine — entirely in Spanish. Built from 63 curated clinical PDFs, every Q&A pair is traceable to its source document, pages, and text chunk.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Introduction" icon="book-open" href="/introduction">
+    Learn what MaternaQA-es is, how it was built, and when to use it.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Load the dataset and run your first fine-tuning smoke test in minutes.
+  </Card>
+  <Card title="Dataset Overview" icon="database" href="/dataset/overview">
+    Explore the 5,727 Q&A pairs, splits, and coverage across 18 clinical topics.
+  </Card>
+  <Card title="Pipeline Overview" icon="arrows-spin" href="/pipeline/overview">
+    Understand the 8-step reproducible pipeline from PDFs to published dataset.
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## What's inside
+
+MaternaQA-es ships three ready-to-use dataset variants and a full reproducible pipeline.
+
+<CardGroup cols={3}>
+  <Card title="sft_grounded" icon="file-lines" href="/dataset/variants">
+    Context + question → answer. Best for RAG and evidence-grounded fine-tuning.
+  </Card>
+  <Card title="sft_closed_book" icon="book" href="/dataset/variants">
+    Question → answer only. Measures how well a model internalizes the clinical domain.
+  </Card>
+  <Card title="qa_flat_jsonl" icon="brackets-curly" href="/dataset/schema">
+    Flat records with full metadata for auditing, analysis, and scientific reporting.
+  </Card>
+</CardGroup>
+
+## Get started in three steps
+
+<Steps>
+  <Step title="Install dependencies">
+    Clone the repo and install the Python environment.
+    ```bash
+    git clone https://github.com/NicolasHoyosDevss/MaternaQA-es.git
+    cd MaternaQA-es
+    python -m venv .venv && source .venv/bin/activate
+    pip install -r requirements.txt
+    ```
+  </Step>
+  <Step title="Load a dataset variant">
+    Use the Hugging Face `datasets` library to load any split locally.
+    ```python
+    from datasets import load_dataset
+
+    dataset = load_dataset(
+        "json",
+        data_files={
+            "train": "datasets/obstetrics/qa/publication/sft_grounded/train.jsonl",
+            "validation": "datasets/obstetrics/qa/publication/sft_grounded/validation.jsonl",
+            "test": "datasets/obstetrics/qa/publication/sft_grounded/test.jsonl",
+        },
+    )
+    ```
+  </Step>
+  <Step title="Run a fine-tuning smoke test">
+    Validate that training loads, runs, and saves a QLoRA adapter before committing to a full run.
+    ```bash
+    python scripts/train_qlora_trl.py \
+      --model-name google/gemma-4-E2B-it \
+      --dataset-variant sft_grounded \
+      --output-dir outputs/smoke-gemma4 \
+      --max-steps 10 \
+      --train-limit 64 \
+      --eval-limit 32
+    ```
+  </Step>
+</Steps>
+
+## Explore the docs
+
+<CardGroup cols={2}>
+  <Card title="Dataset Variants" icon="table-list" href="/dataset/variants">
+    Compare sft_grounded, sft_closed_book, and qa_flat_jsonl formats and pick the right one for your task.
+  </Card>
+  <Card title="Dataset Schema" icon="code" href="/dataset/schema">
+    Field-by-field reference for every JSONL record format used in the dataset.
+  </Card>
+  <Card title="Quality & Evaluation" icon="chart-bar" href="/dataset/quality">
+    Ragas faithfulness and relevance scores, grounding statistics, and question-type distribution.
+  </Card>
+  <Card title="Fine-tuning Guide" icon="microchip" href="/fine-tuning/quickstart">
+    Step-by-step guide to QLoRA training with Gemma 4 and MedGemma 1.5 4B.
+  </Card>
+  <Card title="Scripts Reference" icon="terminal" href="/scripts/extract-pdfs">
+    CLI reference for every pipeline and training script with all flags documented.
+  </Card>
+  <Card title="Hugging Face Hub" icon="arrow-up-right-from-square" href="https://huggingface.co/datasets/JhonHander/obstetrics-qa-synthetic-es">
+    Download the published dataset directly from Hugging Face.
+  </Card>
+</CardGroup>
+
+<Note>
+  MaternaQA-es is a research resource. It does not replace clinical judgment or official medical guidelines. All Q&A pairs are synthetic and must be validated by clinical experts before use in production health systems.
+</Note>

@@ -1,0 +1,97 @@
+---
+title: "MaternaQA-es Dataset Overview and Statistics"
+sidebarTitle: "Overview"
+description: "Explore the MaternaQA-es dataset: 5,727 Spanish clinical Q&A pairs across 57 source PDFs, covering 18 obstetrics and gynecology topics."
+---
+
+MaternaQA-es is a public Spanish-language question-and-answer dataset containing **5,727 synthetic Q&A pairs** derived from 63 curated clinical PDFs on obstetrics and perinatal care. Of those 63 source documents, 57 contribute directly to the published splits. The dataset is written entirely in Spanish and targets the maternal and perinatal health domain, making it a purpose-built resource for Spanish-language NLP research, supervised fine-tuning of large language models, and retrieval-augmented generation (RAG) evaluation.
+
+## Dataset Splits
+
+The 5,727 pairs are divided into three non-overlapping splits. Division is performed **at the document level**, so every Q&A pair in a split comes exclusively from PDFs that do not appear in any other split. This design guarantees zero cross-split contamination.
+
+| Split | Q&A Pairs | Source Chunks | Source PDFs |
+|:------|----------:|--------------:|------------:|
+| Train | 5,093 | 1,744 | 52 |
+| Validation | 306 | 101 | 2 |
+| Test | 328 | 108 | 3 |
+| **Total** | **5,727** | **1,953** | **57** |
+
+<Note>
+  Splits are made at the document level to prevent data leakage. No PDF appears in more than one split, ensuring that train, validation, and test sets share zero source documents.
+</Note>
+
+## Corpus Statistics
+
+The underlying document corpus from which all Q&A pairs are generated has the following characteristics:
+
+| Metric | Value |
+|--------|------:|
+| PDFs processed | 63 |
+| Pages extracted | 5,856 |
+| Pages retained | 5,176 (88.4 %) |
+| Final chunks audited | 2,268 |
+| Chunks in LM dataset | 2,223 |
+| Avg tokens per chunk | 879 |
+| Cross-split contamination | 0 |
+
+Each retained chunk carries traceable metadata including `source_pdf`, `pages`, `section_type`, `content_role`, `clinical_score`, `topics`, and `token_estimate`.
+
+## Clinical Topic Coverage
+
+The 18 annotated clinical topics span the full spectrum of obstetric and gynecological care:
+
+`prenatal_care` · `postpartum` · `preterm_labor` · `labor_induction` · `vaginal_birth` · `cesarean` · `hemorrhage` · `preeclampsia` · `diabetes_gestational` · `infection` · `fetal_monitoring` · `newborn_care` · `ultrasound` · `genetics` · `contraception` · `infertility` · `menopause` · `gynecologic_oncology`
+
+## Question Type Distribution
+
+Questions are generated in six types to cover a range of cognitive demands, from direct fact retrieval to complex clinical reasoning:
+
+| Type | Intent |
+|------|--------|
+| `factual` | Retrieve specific clinical facts. |
+| `definicion` | Explain concepts, conditions, or procedures. |
+| `comparacion` | Differentiate clinical entities or management decisions. |
+| `razonamiento` | Justify causal relationships, risks, or recommendations. |
+| `aplicacion` | Apply knowledge to a described clinical situation. |
+| `hipotetico` | Explore conditional scenarios or case variants. |
+
+## Hugging Face
+
+The published dataset variants are available on Hugging Face Hub. The Q&A dataset contains the three publication variants (SFT grounded, SFT closed-book, and flat JSONL). The LM dataset contains the underlying cleaned and segmented corpus chunks.
+
+<CardGroup cols={2}>
+  <Card
+    title="obstetrics-qa-synthetic-es"
+    icon="database"
+    href="https://huggingface.co/datasets/JhonHander/obstetrics-qa-synthetic-es"
+  >
+    5,727 Q&A pairs across three publication variants (sft\_grounded, sft\_closed\_book, qa\_flat\_jsonl).
+  </Card>
+  <Card
+    title="obstetrics-lm-es"
+    icon="file-lines"
+    href="https://huggingface.co/datasets/JhonHander/obstetrics-lm-es"
+  >
+    2,223 audited clinical corpus chunks used as the source for Q&A generation.
+  </Card>
+</CardGroup>
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card
+    title="Dataset Variants"
+    icon="layer-group"
+    href="/dataset/variants"
+  >
+    Compare sft\_grounded, sft\_closed\_book, and qa\_flat\_jsonl formats and choose the right variant for your use case.
+  </Card>
+  <Card
+    title="Quality Evaluation"
+    icon="chart-bar"
+    href="/dataset/quality"
+  >
+    Ragas faithfulness and answer relevancy results, grounding statistics, and quality methodology.
+  </Card>
+</CardGroup>

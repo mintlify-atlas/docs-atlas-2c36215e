@@ -1,0 +1,222 @@
+---
+title: "Running Inference with Base and Fine-tuned QLoRA Models"
+sidebarTitle: "Inference"
+description: "Generate model predictions on MaternaQA-es test set using inference_base.py for baseline models and inference_qlora.py for trained QLoRA adapters."
+---
+
+Two inference scripts are provided: `inference_base.py` for baseline predictions with unmodified models, and `inference_qlora.py` for models with trained QLoRA adapters. Both scripts operate on the held-out test split (328 pairs), write one prediction per line to a JSONL file, and support resumable execution — if the run is interrupted, re-running the same command picks up from where it left off. Output files from both scripts can be passed directly into `evaluate_model_predictions.py` for Ragas-based scoring.
+
+## Base Model Inference
+
+`inference_base.py` loads a base model without any adapter and generates predictions over the test split. Use this to establish a pre-fine-tuning baseline for comparison against QLoRA-adapted models.
+
+### CLI Flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--model-name` | `str` | *(required)* | Hugging Face model ID or local path |
+| `--model-class` | `auto\|causal-lm\|image-text-to-text` | `auto` | Model loader class; `auto` selects `ImageTextToText` for Gemma 4 / MedGemma |
+| `--dataset-root` | `Path` | `datasets/obstetrics/qa/publication` | Root directory of the dataset variants |
+| `--dataset-variant` | `sft_closed_book\|sft_grounded` | `sft_grounded` | Which test split to run inference on |
+| `--output-prefix` | `Path` | *(required)* | Path prefix; output is written to `<prefix>_predictions.jsonl` |
+| `--max-new-tokens` | `int` | `512` | Maximum tokens to generate per answer |
+| `--temperature` | `float` | `0.7` | Sampling temperature (only used when `--do-sample` is set) |
+| `--top-p` | `float` | `0.9` | Nucleus sampling threshold (only used when `--do-sample` is set) |
+| `--do-sample` | flag | `False` | Enable stochastic sampling; default is greedy decoding for reproducibility |
+| `--limit` | `int` | `None` | Evaluate only the first N examples (for smoke tests) |
+| `--trust-remote-code` | flag | `False` | Pass `trust_remote_code=True` to the model loader |
+| `--attn-implementation` | `str` | `None` | Optional attention backend override |
+| `--load-in-4bit` | `bool` | `True` | Load the base model in 4-bit NF4 for comparable VRAM usage |
+| `--resume` / `--no-resume` | `bool` | `True` | Resume from existing output file; use `--no-resume` to overwrite |
+
+### Usage
+
+<CodeGroup>
+
+```bash Gemma 4 — Base Baseline
+python scripts/inference_base.py \
+  --model-name google/gemma-4-E2B-it \
+  --output-prefix outputs/gemma4-base/test
+```
+
+```bash MedGemma — Base Baseline
+python scripts/inference_base.py \
+  --model-name google/medgemma-1.5-4b-it \
+  --output-prefix outputs/medgemma-base/test
+```
+
+```bash Smoke Test (10 Examples)
+python scripts/inference_base.py \
+  --model-name google/gemma-4-E2B-it \
+  --output-prefix outputs/gemma4-base/test \
+  --limit 10
+```
+
+</CodeGroup>
+
+The script loads the base model in 4-bit NF4 quantization, applies the tokenizer's chat template to construct prompts from the test split, and writes predictions incrementally to `outputs/gemma4-base/test_predictions.jsonl` as it generates each response.
+
+## QLoRA Adapter Inference
+
+`inference_qlora.py` loads a base model in 4-bit quantization and mounts a trained PEFT adapter on top before running inference. The base model is identified automatically from `adapter_config.json` inside the adapter directory — you do not need to specify it separately.
+
+### CLI Flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--adapter-dir` | `Path` | *(required)* | Directory containing `adapter_model.safetensors` and `adapter_config.json` |
+| `--dataset-variant` | `sft_closed_book\|sft_grounded` | `sft_grounded` | Which test split to run inference on |
+| `--output-prefix` | `Path` | *(required)* | Path prefix; output is written to `<prefix>_predictions.jsonl` |
+| `--max-new-tokens` | `int` | `512` | Maximum tokens to generate per answer |
+| `--temperature` | `float` | `0.7` | Sampling temperature (only used when `--do-sample` is set) |
+| `--top-p` | `float` | `0.9` | Nucleus sampling threshold (only used when `--do-sample` is set) |
+| `--do-sample` | flag | `False` | Enable stochastic sampling; default is greedy decoding for reproducibility |
+| `--limit` | `int` | `None` | Evaluate only the first N examples (for smoke tests) |
+| `--trust-remote-code` | flag | `False` | Pass `trust_remote_code=True` to the model loader |
+| `--attn-implementation` | `str` | `None` | Optional attention backend override |
+| `--resume` / `--no-resume` | `bool` | `True` | Resume from existing output file; use `--no-resume` to overwrite |
+
+### Usage
+
+<CodeGroup>
+
+```bash Gemma 4 — Grounded Adapter
+python scripts/inference_qlora.py \
+  --adapter-dir outputs/gemma4-grounded \
+  --output-prefix outputs/gemma4-grounded/test
+```
+
+```bash MedGemma — Grounded Adapter
+python scripts/inference_qlora.py \
+  --adapter-dir outputs/medgemma-grounded \
+  --output-prefix outputs/medgemma-grounded/test
+```
+
+```bash Smoke Test (10 Examples)
+python scripts/inference_qlora.py \
+  --adapter-dir outputs/gemma4-grounded \
+  --output-prefix outputs/gemma4-grounded/test \
+  --limit 10
+```
+
+</CodeGroup>
+
+The script reads `adapter_config.json` to determine the base model, loads it in 4-bit NF4 quantization, mounts the adapter via `PeftModel.from_pretrained`, sets the model to eval mode, and writes predictions incrementally to the output JSONL file.
+
+## Output Format
+
+Both scripts write one JSON object per line to `<output-prefix>_predictions.jsonl`. Each record contains the following fields:
+
+```json
+{
+  "id": "obs-train-001",
+  "model_role": "qlora",
+  "model_name": "google/gemma-4-E2B-it",
+  "adapter_dir": "outputs/gemma4-grounded",
+  "dataset_variant": "sft_grounded",
+  "question": "¿Cuáles son los factores de riesgo para preeclampsia?",
+  "generated_answer": "Los factores de riesgo incluyen...",
+  "reference_answer": "Entre los factores de riesgo se encuentran...",
+  "source_context": "Contexto fuente del fragmento clínico...",
+  "prompt_text": "<bos><start_of_turn>user\n...<end_of_turn>\n<start_of_turn>model\n",
+  "reference_messages": [...],
+  "metadata": {
+    "qa_id": "obs-train-001",
+    "source_pdf": "guia-preeclampsia.pdf",
+    "tipo": "razonamiento",
+    "dificultad": "media",
+    "chunk_id": "chunk-042",
+    "topics": ["preeclampsia", "prenatal_care"]
+  }
+}
+```
+
+For base model runs, `model_role` is `"base"` and `adapter_dir` is `null`. For QLoRA runs, `model_role` is `"qlora"` and `adapter_dir` points to the loaded adapter directory.
+
+## Evaluate Predictions
+
+Pass any `_predictions.jsonl` file into `evaluate_model_predictions.py` to score it with Ragas metrics. The evaluator requires `OPENAI_API_KEY` in the environment.
+
+### CLI Flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--input` | `Path` | *(required)* | JSONL predictions file from `inference_base.py` or `inference_qlora.py` |
+| `--output` | `Path` | `<input_stem>_eval.json` | Summary JSON report path |
+| `--output-jsonl` | `Path` | `<output>.jsonl` | Per-prediction detail JSONL path |
+| `--limit` | `int` | `None` | Evaluate only the first N rows |
+| `--timeout-seconds` | `int` | `180` | Per-prediction timeout for Ragas LLM calls |
+| `--llm-model` | `str` | `gpt-5.4-mini` | OpenAI model used as the Ragas LLM judge |
+| `--embedding-model` | `str` | `text-embedding-3-small` | OpenAI embeddings model for semantic metrics |
+| `--max-completion-tokens` | `int` | `2048` | Output token limit for the LLM judge |
+| `--metrics` | `list` | `faithfulness answer_relevancy answer_correctness semantic_similarity` | Which Ragas metrics to compute |
+| `--resume` / `--no-resume` | `bool` | `True` | Resume from `--output-jsonl` if it exists |
+| `--estimate-only` | flag | `False` | Estimate token volume without calling OpenAI |
+
+```bash
+python scripts/evaluate_model_predictions.py \
+  --input outputs/gemma4-grounded/test_predictions.jsonl \
+  --output outputs/gemma4-grounded/test_eval.json
+```
+
+## Comparing Models
+
+Pre-computed prediction files are available in the repository under the following directories, covering both base and fine-tuned variants:
+
+- `outputs/gemma4-base/` — Gemma 4 E2B without any adapter
+- `outputs/gemma4-grounded/` — Gemma 4 E2B with `sft_grounded` QLoRA adapter
+- `outputs/medgemma-base/` — MedGemma 1.5 4B IT without any adapter
+- `outputs/medgemma-grounded/` — MedGemma 1.5 4B IT with `sft_grounded` QLoRA adapter
+
+Use `convert_eval_to_csv.py` to export all evaluated models to CSV for paper analysis. The script scans the `outputs/` directory for `test_eval.jsonl` files and produces three CSV files:
+
+- `master_eval.csv` — one row per `(model, qa_id)` with all metrics and metadata
+- `model_summary.csv` — one row per model with aggregate scores
+- `wide_comparison.csv` — one row per `qa_id` with side-by-side answers and scores per model
+
+```bash
+python scripts/convert_eval_to_csv.py \
+  --outputs-dir outputs/ \
+  --out-dir csv_outputs/
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--outputs-dir` | `str` | `outputs` | Directory containing model subdirectories with `test_eval.jsonl` files |
+| `--out-dir` | `str` | `csv_outputs` | Directory where the three CSV files are written |
+
+## Quick Evaluation Workflow
+
+<Steps>
+  <Step title="Run Inference">
+    Generate predictions on the held-out test split. Use `inference_base.py` to create a pre-training baseline, or `inference_qlora.py` to score a trained adapter.
+
+    ```bash
+    python scripts/inference_qlora.py \
+      --adapter-dir outputs/gemma4-grounded \
+      --output-prefix outputs/gemma4-grounded/test
+    ```
+  </Step>
+  <Step title="Evaluate with Ragas">
+    Score the predictions against the reference answers and source contexts using `evaluate_model_predictions.py`. The script writes a per-prediction detail JSONL and a JSON summary report.
+
+    ```bash
+    python scripts/evaluate_model_predictions.py \
+      --input outputs/gemma4-grounded/test_predictions.jsonl \
+      --output outputs/gemma4-grounded/test_eval.json
+    ```
+  </Step>
+  <Step title="Export to CSV">
+    Convert all evaluated model outputs to flat CSV files for cross-model comparison and academic analysis.
+
+    ```bash
+    python scripts/convert_eval_to_csv.py \
+      --outputs-dir outputs/ \
+      --out-dir csv_outputs/
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+Always run inference on the `test` split, which was held out during training and hyperparameter selection. Do not evaluate on the `validation` split if it was used to tune early stopping or other training decisions — doing so inflates reported scores and undermines the integrity of the benchmark.
+</Tip>

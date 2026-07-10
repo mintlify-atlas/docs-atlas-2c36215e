@@ -1,0 +1,77 @@
+---
+title: "prepare_qa_publication_variants.py — Dataset Publication Script"
+sidebarTitle: "prepare_qa_publication_variants.py"
+description: "Export the final MaternaQA-es Q&A dataset into sft_grounded, sft_closed_book, and qa_flat_jsonl publication variants ready for Hugging Face upload."
+---
+
+`prepare_qa_publication_variants.py` takes the final Q&A artifacts from `datasets/obstetrics/qa/final/` and exports them as clean, publication-ready JSONL files in three formats. It also strips internal quality-metric fields that are not part of the public API, ensuring the published files are minimal and unambiguous for downstream training and evaluation workflows.
+
+## Usage
+
+```bash
+python scripts/prepare_qa_publication_variants.py
+```
+
+To override the default input or output directories:
+
+```bash
+python scripts/prepare_qa_publication_variants.py \
+  --input-dir datasets/obstetrics/qa/final \
+  --output-dir datasets/obstetrics/qa/publication
+```
+
+## CLI flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--input-dir` | `Path` | `datasets/obstetrics/qa/final` | Directory containing the per-split `raw.jsonl` and `sft.jsonl` files. |
+| `--output-dir` | `Path` | `datasets/obstetrics/qa/publication` | Root directory where publication variants are written. |
+
+## What the script does
+
+The script processes each split (`train`, `validation`, `test`) in sequence:
+
+- **Reads `raw.jsonl`** from `<input-dir>/<split>/raw.jsonl` to produce the flat QA variant.
+- **Reads `sft.jsonl`** from `<input-dir>/<split>/sft.jsonl` to produce the two conversational variants.
+- **Exports `sft_grounded`** — a messages-format JSONL where the user turn contains `Contexto fuente:` followed by the source context excerpt, then `Pregunta:` followed by the question. This format is used to train and evaluate evidence-guided behaviour.
+- **Exports `sft_closed_book`** — a messages-format JSONL where the user turn contains the question only, with no context. This format measures domain adaptation without explicit retrieval context.
+- **Exports `qa_flat_jsonl`** — flat records from `raw.jsonl` with all metadata fields, suitable for exploratory analysis, evaluation harnesses, and custom training pipelines.
+- **Strips quality metric fields** (`faithfulness`, `answer_relevancy`, `roundtrip_consistency`, `quality_verdict`, `quality_reason`) from all three publication variants. These fields are internal generation artefacts and are excluded to keep the public files clean.
+- **Creates `qa_flat_jsonl/all.jsonl`** — a consolidated file combining all three splits into a single JSONL, useful for dataset exploration or simple Hub publication.
+- **Writes `dataset_summary.json`** — a JSON file with row counts, unique chunk counts, and unique source PDF counts per split.
+- **Writes `README.md`** — a human-readable summary of the publication variants, training recommendations, and example loading code.
+
+The script validates that row counts are consistent across all three variants for each split. A mismatch raises a `RuntimeError` before any partial output is left on disk.
+
+## Output structure
+
+```
+datasets/obstetrics/qa/publication/
+├── sft_grounded/
+│   ├── train.jsonl
+│   ├── validation.jsonl
+│   └── test.jsonl
+├── sft_closed_book/
+│   ├── train.jsonl
+│   ├── validation.jsonl
+│   └── test.jsonl
+├── qa_flat_jsonl/
+│   ├── train.jsonl
+│   ├── validation.jsonl
+│   ├── test.jsonl
+│   └── all.jsonl
+├── dataset_summary.json
+└── README.md
+```
+
+## Fields stripped from publication
+
+The following fields are present in the internal `raw.jsonl` artifact but are excluded from all publication files to keep the public dataset clean:
+
+`faithfulness`, `answer_relevancy`, `roundtrip_consistency`, `quality_verdict`, `quality_reason`
+
+These are operational quality estimates produced during generation by the internal judge. They are not part of the public dataset API and should not be used as labels or features in downstream models.
+
+## Publication variant formats
+
+For full documentation of the `sft_grounded`, `sft_closed_book`, and `qa_flat_jsonl` record formats, including field definitions and recommended training configurations, see the [dataset variants reference](/dataset/variants).

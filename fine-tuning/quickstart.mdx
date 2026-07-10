@@ -1,0 +1,112 @@
+---
+title: "Fine-tuning MaternaQA-es with QLoRA: Getting Started"
+sidebarTitle: "Quickstart"
+description: "Start fine-tuning Gemma 4 or MedGemma 1.5 4B on MaternaQA-es with QLoRA in under 5 minutes using the smoke test workflow."
+---
+
+MaternaQA-es ships a ready-to-use QLoRA training script (`train_qlora_trl.py`) that works with Gemma 4 E2B and MedGemma 1.5 4B IT. The recommended starting point is a smoke test that validates the full load → train → save cycle before committing to a full training run. The smoke test runs 10 steps with a tiny slice of the dataset so you can confirm that model loading, LoRA adapter creation, and checkpoint saving all work correctly on your hardware before investing hours of GPU time.
+
+## Requirements
+
+<Note>
+Before launching any training, make sure the following are in place:
+
+- `pip install -r requirements.txt` has been run in your virtual environment
+- `huggingface-cli login` has been executed, or `export HF_TOKEN=<token>` is set in your shell
+- Gemma 4 and MedGemma gated model terms have been accepted at [huggingface.co](https://huggingface.co)
+- An NVIDIA GPU with ≥ 16 GB VRAM is available (QLoRA with bitsandbytes requires NVIDIA CUDA)
+</Note>
+
+## Smoke Test (~3 Minutes)
+
+The smoke test limits training to 10 steps, 64 training examples, and 32 validation examples. It is designed to surface configuration errors — missing tokens, architecture mismatches, VRAM overflows — before a full run.
+
+<CodeGroup>
+
+```bash Gemma 4 E2B
+python scripts/train_qlora_trl.py \
+  --model-name google/gemma-4-E2B-it \
+  --dataset-variant sft_grounded \
+  --output-dir outputs/smoke-gemma4 \
+  --max-steps 10 \
+  --train-limit 64 \
+  --eval-limit 32
+```
+
+```bash MedGemma 1.5 4B
+python scripts/train_qlora_trl.py \
+  --model-name google/medgemma-1.5-4b-it \
+  --dataset-variant sft_grounded \
+  --output-dir outputs/smoke-medgemma \
+  --max-steps 10 \
+  --train-limit 64 \
+  --eval-limit 32
+```
+
+</CodeGroup>
+
+<Tip>
+If MedGemma fails with an architecture error during model loading, add `--model-class causal-lm` to the command. By default the script resolves Gemma 4 and MedGemma models to `AutoModelForImageTextToText`; overriding this to `causal-lm` forces `AutoModelForCausalLM` instead.
+</Tip>
+
+## What Happens During the Smoke Test
+
+When you run the smoke test, the script performs the following steps in order:
+
+- Loads the base model in 4-bit NF4 quantization using bitsandbytes (double quantization enabled)
+- Creates LoRA adapters with rank `r=16` targeting all linear layers (`target_modules="all-linear"`)
+- Converts the published conversational JSONL to `prompt`/`completion` format in memory so that loss is calculated only over the expected answer
+- Runs exactly 10 training steps with the TRL `SFTTrainer`
+- Saves only the LoRA adapter weights and tokenizer to `--output-dir` (the base model is not modified)
+
+## Choose a Dataset Variant
+
+MaternaQA-es provides two dataset variants for supervised fine-tuning. Both cover the full 5,093-pair training split.
+
+<Tabs>
+  <Tab title="sft_grounded">
+    Each training example contains a **source context** (a clinical passage from one of the 63 curated PDFs) followed by the question. The model learns to answer by reasoning over the provided evidence.
+
+    This is the **recommended starting point**. It produces evidence-grounded models that cite context at inference time and is the variant used in the benchmark experiments reported in the dataset publication.
+
+    ```
+    datasets/obstetrics/qa/publication/sft_grounded/
+    ├── train.jsonl       # 5,093 pairs
+    ├── validation.jsonl  # 306 pairs
+    └── test.jsonl        # 328 pairs (held out)
+    ```
+  </Tab>
+  <Tab title="sft_closed_book">
+    Each training example contains only the **question** with no source context. The model must answer from internalized domain knowledge alone.
+
+    Use this variant to measure how much obstetric and perinatal knowledge the model internalizes during fine-tuning, independently of retrieval or context injection.
+
+    ```
+    datasets/obstetrics/qa/publication/sft_closed_book/
+    ├── train.jsonl       # 5,093 pairs
+    ├── validation.jsonl  # 306 pairs
+    └── test.jsonl        # 328 pairs (held out)
+    ```
+  </Tab>
+</Tabs>
+
+## Next Steps
+
+Once the smoke test completes without errors, you are ready to run full training or generate predictions from a trained adapter.
+
+<CardGroup cols={2}>
+  <Card
+    title="Full QLoRA Training"
+    icon="graduation-cap"
+    href="/fine-tuning/training"
+  >
+    Run 2-epoch fine-tuning over all 5,093 training pairs. Covers all CLI flags, key hyperparameters, and the recommended experiment matrix.
+  </Card>
+  <Card
+    title="Running Inference"
+    icon="play"
+    href="/fine-tuning/inference"
+  >
+    Generate predictions on the held-out test split with base models or trained QLoRA adapters, then evaluate with Ragas metrics.
+  </Card>
+</CardGroup>

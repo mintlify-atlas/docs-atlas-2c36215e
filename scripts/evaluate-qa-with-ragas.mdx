@@ -1,0 +1,131 @@
+---
+title: "evaluate_qa_with_ragas.py — Ragas Dataset Evaluation Script"
+sidebarTitle: "evaluate_qa_with_ragas.py"
+description: "Evaluate MaternaQA-es Q&A quality using Ragas metrics including faithfulness and answer relevancy. Outputs per-sample scores and aggregate statistics."
+---
+
+`evaluate_qa_with_ragas.py` runs formal quality evaluation on Q&A pairs using Ragas v0.4.3. This is the formal dataset evaluation layer — separate from the operational judge used during generation. Results are stored as JSON and used to compute the published Ragas scores that accompany MaternaQA-es. The script runs two internal metric passes (faithfulness and answer relevancy) and merges them into a single final report, a design that avoids hangs observed when both passes are combined.
+
+## Prerequisites
+
+<Note>
+  The following packages are required and pinned in `requirements.txt`:
+
+  - `ragas==0.4.3`
+  - `langchain-community==0.3.31`
+
+  An `OPENAI_API_KEY` is also required — it is used by both the Ragas LLM judge and the optional custom quality judge. Set it via environment variable or a `.env` file in the project root.
+</Note>
+
+## Usage
+
+Evaluate a stratified random sample of 300 pairs from the train split:
+
+```bash
+python scripts/evaluate_qa_with_ragas.py \
+  --input datasets/obstetrics/qa/final/train/raw.jsonl \
+  --sample-size 300 \
+  --seed 42 \
+  --custom-judge-model gpt-5.4-mini \
+  --output datasets/obstetrics/qa/final/ragas_results/final_train_sample300_eval.json
+```
+
+## CLI flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--input` | `Path` | *(required)* | Path to the `raw.jsonl` file to evaluate. |
+| `--output` | `Path` | `None` | Output JSON report path. If omitted, the script creates `eval_<input_stem>.json` in the same directory. |
+| `--limit` | `int` | `None` | Evaluate only the first N pairs. Useful for quick validation. |
+| `--sample-size` | `int` | `None` | Evaluate a stratified random sample of N pairs (stratified by `source_pdf`). Recommended for the final dataset to control cost. |
+| `--seed` | `int` | `42` | Random seed for reproducible sampling when `--sample-size` is used. |
+| `--timeout-seconds` | `int` | `180` | Maximum timeout in seconds per metric pass per pair. |
+| `--llm-model` | `str` | `gpt-4o-mini` | LLM model used by Ragas as the evaluator judge. |
+| `--embedding-model` | `str` | `text-embedding-3-small` | Embedding model used for Answer Relevancy. |
+| `--custom-judge-model` | `str` | `None` | If set, also runs a custom quality validation pass on the same sample using this model. |
+| `--custom-only` | flag | `False` | Skip Ragas passes entirely and run only the custom judge. Requires `--custom-judge-model`. |
+| `--custom-debug-raw` | flag | `False` | On custom judge errors, include the raw judge response and roundtrip answer in the report for diagnosis. |
+| `--existing-report` | `Path` | `None` | Path to an existing `eval_*.json` report with `per_pair` data. Use this to recompute only the custom pass while preserving existing Ragas scores. |
+| `--lm-chunks` | `Path` (one or more) | `None` | Path(s) to LM chunk files (e.g. `datasets/obstetrics/lm/train_lm.jsonl`). When provided, the full source chunk text is used as context for Ragas Faithfulness instead of the co-generated `contexto_fuente` excerpt. Recommended for honest evaluation. |
+
+## Metrics computed
+
+**Faithfulness** (`ragas_faithfulness`)
+: Measures whether the answer is grounded in and supported by the retrieved source context. A score of 1.0 means every claim in the answer can be attributed to the context chunk; 0.0 means the answer cannot be traced to the context at all. This is the primary metric for detecting hallucinations in the dataset.
+
+**Answer Relevancy** (`ragas_answer_relevancy`)
+: Measures whether the answer actually addresses the question that was asked. It is computed using embedding similarity between the question and hypothetical questions generated from the answer. A score close to 1.0 indicates a highly on-topic response; lower scores indicate incomplete or off-topic answers.
+
+When `--custom-judge-model` is also set, the script additionally computes:
+
+- `custom_faithfulness` — faithfulness estimated by the custom judge.
+- `custom_answer_relevancy` — answer relevancy estimated by the custom judge.
+- `custom_roundtrip_consistency` — consistency between the original answer and a fresh roundtrip answer generated independently from the same context.
+- `custom_question_groundness` — whether the question is answerable using the source context alone.
+- `custom_verdict` — `accept` or `reject` per pair.
+
+## Published Ragas results
+
+The following scores were computed using `--sample-size` stratified sampling with `--seed 42` on the final dataset artifacts:
+
+| Split | Sample size / Total pairs | Faithfulness | Answer Relevancy |
+|---|---|---|---|
+| Train | 300 / 5,093 | 0.7726 | 0.6466 |
+| Validation | 100 / 306 | 0.7826 | 0.6812 |
+| Test | 100 / 328 | 0.7132 | 0.5583 |
+
+## Output files
+
+The script writes a single JSON report to `--output`. The report has the following top-level structure:
+
+```json
+{
+  "script_version": "qa_sample_eval_v2",
+  "generated_at": "<ISO-8601 timestamp>",
+  "input_file": "datasets/obstetrics/qa/final/train/raw.jsonl",
+  "total_pairs_in_input": 5093,
+  "sampled_pairs": 300,
+  "sample_size_requested": 300,
+  "sample_seed": 42,
+  "ragas_models": {
+    "llm_model": "gpt-4o-mini",
+    "embedding_model": "text-embedding-3-small"
+  },
+  "summary": {
+    "pairs_evaluated": 300,
+    "pairs_scored_faithfulness": 298,
+    "pairs_scored_answer_relevancy": 297,
+    "avg_ragas_faithfulness": 0.7726,
+    "avg_ragas_answer_relevancy": 0.6466,
+    "questions_with_meta_reference": 0,
+    "answers_with_meta_reference": 0,
+    ...
+  },
+  "per_pair": [
+    {
+      "qa_id": "chunk_001_qa_001",
+      "chunk_id": "chunk_001",
+      "source_pdf": "document.pdf",
+      "tipo": "factual",
+      "dificultad": "basico",
+      "pregunta": "...",
+      "respuesta": "...",
+      "ragas_faithfulness": 0.85,
+      "ragas_answer_relevancy": 0.72,
+      ...
+    }
+  ]
+}
+```
+
+`summary` contains aggregate statistics including mean, min, and max for both metrics, error counts, and cleanliness checks (meta-reference detection). `per_pair` contains one record per evaluated pair with individual scores, reasons, and any error details.
+
+## Dependency version pinning
+
+<Warning>
+  `ragas==0.4.3` must be used together with `langchain-community==0.3.31`. Upgrading `langchain-community` to 0.4.x breaks this setup because `langchain-community` 0.4.x removed a module that Ragas 0.4.3 still imports at runtime. Do not upgrade either package without re-testing the full evaluation pipeline first.
+</Warning>
+
+## Companion script: audit_dataset.py
+
+`scripts/audit_dataset.py` is a complementary data integrity tool that runs independently of the Ragas evaluation. It audits the full dataset pipeline — raw pages, clean pages, corpus chunks, and LM split files — and generates a comprehensive integrity report at `artifacts/obstetrics/reports/audit_report.json`. The report covers PDF coverage, split source balance, topic distribution, language distribution, leakage detection across splits, and table extraction statistics. Run it after any significant change to the corpus or split assignments to verify pipeline integrity.

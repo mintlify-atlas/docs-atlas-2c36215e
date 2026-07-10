@@ -1,0 +1,114 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "MaternaQA-es",
+  "projectDescription": "MaternaQA-es is a public Spanish-language Q&A dataset (5,727 pairs) for maternal healthcare NLP research, LLM fine-tuning, and RAG evaluation, built from curated clinical PDFs covering obstetrics and perinatal care.",
+  "theme": "almond",
+  "primaryColor": "#dedede",
+  "lightColor": "#fbde58",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Dataset",
+            "pages": [
+              "dataset/overview",
+              "dataset/variants",
+              "dataset/schema",
+              "dataset/quality"
+            ]
+          },
+          {
+            "group": "Pipeline",
+            "pages": [
+              "pipeline/overview",
+              "pipeline/corpus-construction",
+              "pipeline/qa-generation",
+              "pipeline/evaluation"
+            ]
+          },
+          {
+            "group": "Fine-tuning",
+            "pages": [
+              "fine-tuning/quickstart",
+              "fine-tuning/training",
+              "fine-tuning/inference"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Scripts Reference",
+        "groups": [
+          {
+            "group": "Corpus Scripts",
+            "pages": [
+              "scripts/extract-pdfs",
+              "scripts/clean-text",
+              "scripts/build-lm-dataset"
+            ]
+          },
+          {
+            "group": "QA Scripts",
+            "pages": [
+              "scripts/generate-synthetic-qa",
+              "scripts/evaluate-qa-with-ragas",
+              "scripts/prepare-qa-publication-variants"
+            ]
+          },
+          {
+            "group": "Model Scripts",
+            "pages": [
+              "scripts/train-qlora-trl",
+              "scripts/inference-base",
+              "scripts/inference-qlora",
+              "scripts/evaluate-model-predictions"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "5,727 Spanish-language clinical Q&A pairs derived from 63 obstetrics/gynaecology PDFs",
+    "Three ready-to-use dataset variants: sft_grounded, sft_closed_book, and qa_flat_jsonl",
+    "Reproducible 8-step pipeline: PDF extraction → cleaning → chunking → enrichment → QA generation → quality control → evaluation → publication",
+    "Ragas-based quality evaluation with faithfulness and answer-relevancy scores across all splits",
+    "QLoRA fine-tuning scripts for Gemma 4 and MedGemma 1.5 4B with TRL + PEFT + bitsandbytes",
+    "Document-level train/validation/test split to prevent data leakage",
+    "Full auditability: every QA pair is traceable to its source PDF, pages, and chunk",
+    "Published on Hugging Face Hub (JhonHander/obstetrics-qa-synthetic-es)"
+  ],
+  "publicApiSurface": [
+    "scripts/run_full_pipeline.py",
+    "scripts/run_incremental.py",
+    "scripts/extract_pdfs.py",
+    "scripts/clean_text.py",
+    "scripts/build_lm_dataset.py",
+    "scripts/content_enrichment.py",
+    "scripts/extract_tables.py",
+    "scripts/generate_synthetic_qa.py",
+    "scripts/audit_dataset.py",
+    "scripts/evaluate_qa_with_ragas.py",
+    "scripts/prepare_qa_publication_variants.py",
+    "scripts/train_qlora_trl.py",
+    "scripts/inference_base.py",
+    "scripts/inference_qlora.py",
+    "scripts/evaluate_model_predictions.py",
+    "scripts/consolidate_qa_experiments.py",
+    "scripts/convert_eval_to_csv.py",
+    "datasets/obstetrics/qa/publication/sft_grounded/{train,validation,test}.jsonl",
+    "datasets/obstetrics/qa/publication/sft_closed_book/{train,validation,test}.jsonl",
+    "datasets/obstetrics/qa/publication/qa_flat_jsonl/{train,validation,test,all}.jsonl",
+    "datasets/obstetrics/lm/{train,validation,test}_lm.jsonl"
+  ]
+}

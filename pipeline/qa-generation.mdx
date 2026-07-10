@@ -1,0 +1,137 @@
+---
+title: "Synthetic Q&A Generation from Clinical Text Chunks"
+sidebarTitle: "QA Generation"
+description: "Generate Spanish clinical Q&A pairs from corpus chunks using OpenAI structured outputs, with question types, difficulty levels, and operational quality filtering."
+---
+
+`generate_synthetic_qa.py` uses **OpenAI Structured Outputs** to produce clinically-grounded Spanish Q&A pairs from LM corpus chunks. The async pipeline processes all eligible chunks concurrently and writes resumable checkpoints after each chunk, so interrupted runs can continue exactly where they left off without duplicating API calls or overwriting completed work.
+
+## Prerequisites
+
+<Note>
+An `OPENAI_API_KEY` environment variable is required to run generation. Set it with `export OPENAI_API_KEY="sk-..."` before invoking the script.
+
+**Recommended model:** `gpt-5.4-mini` (≈$1.10 for 856 chunks). Other options:
+- `gpt-5.4` — balanced quality/cost (≈$4.50)
+- `gpt-5.5` — maximum clinical quality (≈$8.00)
+</Note>
+
+## Basic Usage
+
+The following command generates Q&A pairs for the train split with explicit output paths:
+
+```bash
+python scripts/generate_synthetic_qa.py \
+  --input datasets/obstetrics/lm/train_lm.jsonl \
+  --raw-output datasets/obstetrics/qa/final/train/raw.jsonl \
+  --sft-output datasets/obstetrics/qa/final/train/sft.jsonl \
+  --progress-file datasets/obstetrics/qa/final/train/progress.json \
+  --report-output datasets/obstetrics/qa/final/train/generation_report.json \
+  --model gpt-5.4-mini \
+  --min-pairs 2 \
+  --max-pairs 5
+```
+
+## Dry Run
+
+To preview statistics and cost estimates without making any API calls:
+
+```bash
+python scripts/generate_synthetic_qa.py --dry-run
+```
+
+## Question Types Generated
+
+The generator produces six question types to cover a range of cognitive and clinical complexity levels:
+
+| Type | Description |
+|---|---|
+| `factual` | Retrieve a specific clinical fact from the source chunk |
+| `definicion` | Explain a medical concept, condition, or procedure |
+| `comparacion` | Contrast clinical entities, diagnoses, or management approaches |
+| `razonamiento` | Justify causal relationships, risk assessments, or clinical recommendations |
+| `aplicacion` | Apply clinical knowledge to a described patient scenario |
+| `hipotetico` | Explore conditional scenarios or case variants grounded in the chunk |
+
+## Difficulty Levels
+
+Questions are generated across three difficulty levels: **basico**, **intermedio**, and **avanzado**. The number of pairs generated per chunk is not fixed — it scales with the chunk's `token_estimate` and `clinical_score`, so denser and longer chunks produce more Q&A pairs within the `--min-pairs` / `--max-pairs` bounds.
+
+## Quality Rules
+
+The generator enforces the following rules during the generation prompt to ensure Q&A pairs are self-contained and clinically grounded:
+
+- **No meta-references**: questions must not contain phrases like "according to the text", "according to the fragment", "according to the context", or "according to the table". Every question must be interpretable without knowing it came from a specific document.
+- **No double questions**: each question must have a single, clear clinical demand.
+- **Grounded answers**: every answer must be directly supported by the source chunk. Each pair preserves a `contexto_fuente` field that records the evidence backing the answer, enabling downstream audit and grounded evaluation.
+
+## Operational Judge
+
+During the generation pass, a **custom LLM-as-a-judge** evaluates each produced pair and estimates:
+
+| Field | Description |
+|---|---|
+| `faithfulness` | How well the answer is supported by the source chunk context |
+| `answer_relevancy` | How directly the answer addresses the question |
+| `roundtrip_consistency` | Whether the question can be recovered from the answer and context alone |
+| `quality_verdict` | Operational accept/reject verdict for the pair |
+| `quality_reason` | Short human-readable explanation of the verdict |
+
+This layer helps filter weak pairs and prioritize manual review before formal evaluation. It does not replace the Ragas formal evaluation — it is a construction-time diagnostic tool.
+
+## Output Files Per Split
+
+Each split produces four output files:
+
+- **`raw.jsonl`** — auditable pairs with all metadata fields, source context, judge scores, and generation provenance. This is the primary artifact for evaluation and audit.
+- **`sft.jsonl`** — pairs in `messages` format (system / user / assistant) ready for supervised fine-tuning with TRL or any OpenAI-compatible trainer.
+- **`progress.json`** — checkpoint file recording which `chunk_id` values have been processed, enabling safe resumption.
+- **`generation_report.json`** — per-split statistics including total pairs generated, acceptance rate, grounding overlap, model used, and topic coverage.
+
+## Resume Interrupted Runs
+
+The `--progress-file` flag points to a JSON checkpoint that records every chunk already processed. If generation is interrupted for any reason — network error, API quota, or manual stop — re-running the same command will skip all completed chunks and resume from the last unprocessed one.
+
+## Processing All Three Splits
+
+Run generation separately for each split, adjusting the `--input` path and output directory:
+
+<CodeGroup>
+
+```bash Train
+python scripts/generate_synthetic_qa.py \
+  --input datasets/obstetrics/lm/train_lm.jsonl \
+  --raw-output datasets/obstetrics/qa/final/train/raw.jsonl \
+  --sft-output datasets/obstetrics/qa/final/train/sft.jsonl \
+  --progress-file datasets/obstetrics/qa/final/train/progress.json \
+  --report-output datasets/obstetrics/qa/final/train/generation_report.json \
+  --model gpt-5.4-mini \
+  --min-pairs 2 \
+  --max-pairs 5
+```
+
+```bash Validation
+python scripts/generate_synthetic_qa.py \
+  --input datasets/obstetrics/lm/validation_lm.jsonl \
+  --raw-output datasets/obstetrics/qa/final/validation/raw.jsonl \
+  --sft-output datasets/obstetrics/qa/final/validation/sft.jsonl \
+  --progress-file datasets/obstetrics/qa/final/validation/progress.json \
+  --report-output datasets/obstetrics/qa/final/validation/generation_report.json \
+  --model gpt-5.4-mini \
+  --min-pairs 2 \
+  --max-pairs 5
+```
+
+```bash Test
+python scripts/generate_synthetic_qa.py \
+  --input datasets/obstetrics/lm/test_lm.jsonl \
+  --raw-output datasets/obstetrics/qa/final/test/raw.jsonl \
+  --sft-output datasets/obstetrics/qa/final/test/sft.jsonl \
+  --progress-file datasets/obstetrics/qa/final/test/progress.json \
+  --report-output datasets/obstetrics/qa/final/test/generation_report.json \
+  --model gpt-5.4-mini \
+  --min-pairs 2 \
+  --max-pairs 5
+```
+
+</CodeGroup>

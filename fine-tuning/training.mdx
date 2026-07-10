@@ -1,0 +1,160 @@
+---
+title: "QLoRA Training with TRL, PEFT, and bitsandbytes"
+sidebarTitle: "Training"
+description: "Run full QLoRA fine-tuning on MaternaQA-es using TRL and PEFT. Covers model selection, dataset variants, hyperparameters, and saving LoRA adapters."
+---
+
+`train_qlora_trl.py` implements the canonical Hugging Face QLoRA training path with TRL + PEFT + bitsandbytes. It converts the published conversational JSONL to `prompt`/`completion` format in memory, so loss is calculated only over the expected answer without relying on model-specific chat template masks. This makes training robust across Gemma 4 and MedGemma checkpoints, which may not expose assistant turn masks in their tokenizer templates. The base model is never modified — only the LoRA adapter weights are updated and saved.
+
+## Full Training Commands
+
+The following commands run the complete fine-tuning over all 5,093 training pairs with the default hyperparameters (2 epochs, batch 1, gradient accumulation 8). Expect 2–4 hours per run depending on GPU speed.
+
+<CodeGroup>
+
+```bash Gemma 4 — Grounded
+python scripts/train_qlora_trl.py \
+  --model-name google/gemma-4-E2B-it \
+  --dataset-variant sft_grounded \
+  --output-dir outputs/gemma4-grounded
+```
+
+```bash Gemma 4 — Closed-Book
+python scripts/train_qlora_trl.py \
+  --model-name google/gemma-4-E2B-it \
+  --dataset-variant sft_closed_book \
+  --output-dir outputs/gemma4-closed-book
+```
+
+```bash MedGemma — Grounded
+python scripts/train_qlora_trl.py \
+  --model-name google/medgemma-1.5-4b-it \
+  --dataset-variant sft_grounded \
+  --output-dir outputs/medgemma-grounded
+```
+
+```bash MedGemma — Closed-Book
+python scripts/train_qlora_trl.py \
+  --model-name google/medgemma-1.5-4b-it \
+  --dataset-variant sft_closed_book \
+  --output-dir outputs/medgemma-closed-book
+```
+
+</CodeGroup>
+
+## Key Training Defaults
+
+The script ships with conservative defaults tuned for a 16 GB VRAM workstation. All values below come directly from `train_qlora_trl.py`.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `--num-train-epochs` | `2.0` | Number of full passes over the training split |
+| `--per-device-train-batch-size` | `1` | Per-GPU batch size; kept low to fit within 16 GB VRAM |
+| `--gradient-accumulation-steps` | `8` | Simulates an effective batch size of 8 without extra memory |
+| `--learning-rate` | `2e-4` | Standard learning rate for LoRA / SFT |
+| `--lora-r` | `16` | LoRA rank — controls adapter capacity |
+| `--lora-alpha` | `16` | LoRA scaling factor |
+| `--lora-dropout` | `0.05` | Dropout applied inside LoRA layers |
+| `--max-length` | `1024` | Maximum token length per training example |
+| `--quantization` | 4-bit NF4 | bitsandbytes double-quantization with NF4 data type |
+| `--warmup-ratio` | `0.03` | Fraction of steps used for learning rate warm-up |
+| `--max-grad-norm` | `0.3` | Gradient clipping threshold |
+| `--seed` | `3407` | Random seed for reproducibility |
+| `--gradient-checkpointing` | `True` | Reduces VRAM at the cost of extra compute |
+| `--packing` | `False` | Disabled to prevent cross-sample contamination |
+
+## All CLI Flags
+
+Every flag exposed by `parse_args()` in `train_qlora_trl.py` is listed below.
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--model-name` | `str` | `google/gemma-4-E2B-it` | Hugging Face model ID or local path of the base model |
+| `--model-class` | `auto\|causal-lm\|image-text-to-text` | `auto` | Forces a specific model loader class; `auto` selects `ImageTextToText` for Gemma 4 / MedGemma |
+| `--dataset-root` | `Path` | `datasets/obstetrics/qa/publication` | Root directory containing the publication variant folders |
+| `--dataset-variant` | `sft_closed_book\|sft_grounded` | `sft_grounded` | Which SFT variant to train on |
+| `--output-dir` | `Path` | *(required)* | Directory where the LoRA adapter and tokenizer are saved |
+| `--max-length` | `int` | `1024` | Maximum token length per example |
+| `--num-train-epochs` | `float` | `2.0` | Number of training epochs |
+| `--max-steps` | `int` | `None` | If set, overrides `--num-train-epochs` and stops after N steps |
+| `--per-device-train-batch-size` | `int` | `1` | Training batch size per GPU |
+| `--per-device-eval-batch-size` | `int` | `1` | Evaluation batch size per GPU |
+| `--gradient-accumulation-steps` | `int` | `8` | Steps to accumulate before a weight update |
+| `--learning-rate` | `float` | `2e-4` | Initial learning rate |
+| `--warmup-ratio` | `float` | `0.03` | Fraction of total steps for LR warm-up |
+| `--weight-decay` | `float` | `0.0` | L2 regularization coefficient |
+| `--max-grad-norm` | `float` | `0.3` | Gradient clipping max norm |
+| `--lora-r` | `int` | `16` | LoRA rank |
+| `--lora-alpha` | `int` | `16` | LoRA alpha scaling |
+| `--lora-dropout` | `float` | `0.05` | LoRA dropout rate |
+| `--logging-steps` | `int` | `10` | Steps between TensorBoard log entries |
+| `--save-steps` | `int` | `None` | Steps between checkpoint saves (used when `--save-strategy steps`) |
+| `--eval-steps` | `int` | `None` | Steps between evaluations (used when `--eval-strategy steps`) |
+| `--save-strategy` | `no\|steps\|epoch` | `epoch` | When to save checkpoints |
+| `--eval-strategy` | `no\|steps\|epoch` | `epoch` | When to run evaluation |
+| `--train-limit` | `int` | `None` | Limit training examples to N (for smoke tests) |
+| `--eval-limit` | `int` | `None` | Limit validation examples to N (for smoke tests) |
+| `--seed` | `int` | `3407` | Global random seed |
+| `--assistant-only-loss` | `bool` | `False` | Advanced: use chat template assistant masks instead of `prompt`/`completion` split |
+| `--packing` | `bool` | `False` | Pack short sequences to improve GPU utilization |
+| `--gradient-checkpointing` | `bool` | `True` | Trade compute for lower VRAM usage |
+| `--trust-remote-code` | `bool` | `False` | Enable only if the model requires it |
+| `--attn-implementation` | `str` | `None` | Optional attention backend: `eager`, `sdpa`, `flash_attention_2` |
+| `--dry-run` | flag | `False` | Validate dataset loading without loading the model or training |
+| `--allow-cpu` | flag | `False` | Allow `--dry-run` without CUDA (QLoRA training still requires GPU) |
+
+## Training Outputs
+
+After training completes, `--output-dir` contains the following files:
+
+```text
+outputs/gemma4-grounded/
+├── adapter_config.json           # LoRA configuration and base model reference
+├── adapter_model.safetensors     # Trained LoRA adapter weights
+├── tokenizer.json                # Saved tokenizer
+├── tokenizer_config.json         # Tokenizer configuration
+├── special_tokens_map.json       # Special token mappings
+├── chat_template.jinja           # Chat template saved alongside tokenizer
+├── training_args.bin             # Serialized SFTConfig used during training
+└── checkpoint-N/                 # Intermediate checkpoints saved per epoch or step
+    ├── adapter_model.safetensors
+    ├── adapter_config.json
+    ├── optimizer.pt
+    ├── scheduler.pt
+    └── trainer_state.json
+```
+
+The base model weights are never written to disk — only the adapter files. To run inference, you load the original base model from Hugging Face and mount the adapter on top.
+
+## Model Compatibility Notes
+
+<Note>
+**Gemma 4** (`google/gemma-4-E2B-it`) is supported by Unsloth for potentially faster training on compatible hardware. The canonical path in this repository is TRL + PEFT + bitsandbytes QLoRA, which is reproducible without Unsloth-specific patches.
+
+**MedGemma 1.5 4B IT** (`google/medgemma-1.5-4b-it`) should use the TRL + PEFT + bitsandbytes path. Unsloth has MedGemma artifacts on Hugging Face, but validate with a smoke test before relying on Unsloth for that model.
+
+**Full fine-tuning** is not the target workflow. QLoRA adapters are the default and recommended method for this dataset and hardware profile.
+
+**16 GB VRAM** is the minimum for E2B-class models. The default batch size of 1 with gradient accumulation 8 is intentionally conservative to remain within this limit.
+</Note>
+
+## Recommended Experiment Matrix
+
+The following four experiments are the core benchmark defined in the dataset publication. Each combination measures a different capability axis.
+
+| Model Family | Dataset Variant | Training Path | Purpose |
+|---|---|---|---|
+| Gemma 4 instruct | `sft_grounded` | TRL + PEFT + bitsandbytes (QLoRA) | Measure evidence-guided QA performance |
+| Gemma 4 instruct | `sft_closed_book` | TRL + PEFT + bitsandbytes (QLoRA) | Measure domain internalization without context |
+| MedGemma 1.5 4B IT | `sft_grounded` | TRL + PEFT + bitsandbytes (QLoRA) | Measure evidence-guided QA on a medical instruct base |
+| MedGemma 1.5 4B IT | `sft_closed_book` | TRL + PEFT + bitsandbytes (QLoRA) | Measure domain adaptation without context on a medical model |
+
+## TensorBoard Monitoring
+
+The trainer writes TensorBoard events to `outputs/<model>/runs/` automatically (configured via `report_to: ["tensorboard"]` in `SFTConfig`). Launch TensorBoard to track training loss, evaluation loss, and learning rate schedule in real time:
+
+```bash
+tensorboard --logdir outputs/
+```
+
+Each model's run appears as a separate entry in the TensorBoard UI, allowing side-by-side comparison of Gemma 4 and MedGemma training curves across both dataset variants.

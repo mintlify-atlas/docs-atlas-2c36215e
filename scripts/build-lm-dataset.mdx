@@ -1,0 +1,120 @@
+---
+title: "build_lm_dataset.py — Corpus Chunking and LM Dataset Builder"
+sidebarTitle: "build_lm_dataset.py"
+description: "Segment clean clinical pages into auditable chunks with token limits, clinical scores, and topic annotations, then export train/validation/test LM splits."
+---
+
+`build_lm_dataset.py` takes clean pages from `clean_pages.jsonl` and groups them into clinically meaningful chunks. Each chunk has a stable ID, token estimate, clinical score, and topic annotations — making it suitable as direct LM training data or as input for Q&A generation. The script also deduplicates near-duplicate chunks across PDFs, enriches every chunk with section type and content role classifications, and exports document-level train/validation/test splits with a verified zero-leakage guarantee.
+
+## Usage
+
+```bash
+python scripts/build_lm_dataset.py \
+  --input artifacts/obstetrics/corpus/clean_pages.jsonl \
+  --inventory artifacts/obstetrics/metadata/inventory.json \
+  --chunks-output artifacts/obstetrics/corpus/chunks.jsonl \
+  --train-output datasets/obstetrics/lm/train_lm.jsonl \
+  --validation-output datasets/obstetrics/lm/validation_lm.jsonl \
+  --test-output datasets/obstetrics/lm/test_lm.jsonl \
+  --build-report-output artifacts/obstetrics/reports/build_report.json \
+  --min-tokens 500 \
+  --max-tokens 1200 \
+  --overlap-tokens 80 \
+  --min-accepted-tokens 180 \
+  --min-clinical-score 5 \
+  --validation-ratio 0.05 \
+  --test-ratio 0.05 \
+  --allowed-languages es,unknown \
+  --seed 42
+```
+
+## CLI Flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--input` | `Path` | `artifacts/obstetrics/corpus/clean_pages.jsonl` | Clean pages JSONL produced by `clean_text.py`. |
+| `--inventory` | `Path` | `artifacts/obstetrics/metadata/inventory.json` | Document manifest used for split reporting. |
+| `--chunks-output` | `Path` | `artifacts/obstetrics/corpus/chunks.jsonl` | Full enriched chunk list before split, useful for auditing. |
+| `--train-output` | `Path` | `datasets/obstetrics/lm/train_lm.jsonl` | Destination for the training split. |
+| `--validation-output` | `Path` | `datasets/obstetrics/lm/validation_lm.jsonl` | Destination for the validation split. |
+| `--test-output` | `Path` | `datasets/obstetrics/lm/test_lm.jsonl` | Destination for the test split. |
+| `--build-report-output` | `Path` | `artifacts/obstetrics/reports/build_report.json` | Destination for the detailed build and split audit report. |
+| `--min-tokens` | `int` | `500` | Minimum token estimate for a chunk to be flushed from the buffer during chunking. |
+| `--max-tokens` | `int` | `1200` | Maximum token estimate before the buffer is forcibly flushed and overlap is applied. |
+| `--overlap-tokens` | `int` | `80` | Number of tail words carried forward into the next chunk when a flush occurs at `--max-tokens`. |
+| `--min-accepted-tokens` | `int` | `180` | Absolute minimum token estimate for a chunk to pass the acceptance filter after chunking. |
+| `--min-clinical-score` | `int` | `5` | Minimum clinical score required for a chunk to be accepted into the final dataset. |
+| `--validation-ratio` | `float` | `0.05` | Target fraction of total chunks assigned to the validation split (by document). |
+| `--test-ratio` | `float` | `0.05` | Target fraction of total chunks assigned to the test split (by document). |
+| `--allowed-languages` | `string` | `"es,unknown"` | Comma-separated language codes. Chunks in other languages are excluded from LM exports. |
+| `--seed` | `int` | `42` | Random seed for reproducible document-level splits. |
+
+## Chunking Strategy
+
+Pages are grouped first by source PDF and then by detected section heading. Within each group, paragraphs are appended to a running buffer until the token estimate approaches `--max-tokens`. When the buffer reaches the limit it is flushed as a chunk; the final `--overlap-tokens` words from the flushed chunk are seeded into the next buffer to preserve cross-chunk context. If the buffer has accumulated at least `--min-tokens` tokens when a new page group ends, it is also flushed. Any remaining buffer content is flushed at end-of-document regardless of size.
+
+Token estimates use a word-count multiplier (`words × 1.35`) that approximates subword tokenization without requiring a specific tokenizer, keeping the chunking step model-agnostic.
+
+After chunking, near-duplicate chunks are removed: candidates are ranked by descending clinical score and token count, then deduplicated on both exact text and a 240-word normalized prefix fingerprint. Only the highest-quality copy of each near-duplicate is retained.
+
+## Document-Level Splitting
+
+<Note>
+The train/validation/test split is performed at the **PDF document level**, not at the page or chunk level. Every chunk from a given source PDF lands in exactly one split. This prevents any text from the same source document appearing in multiple splits, ensuring zero data leakage between training and evaluation sets. The `--seed` flag makes the split fully reproducible. The `build_report.json` output records `leakage_detected: false` and lists each PDF's assigned split for verification.
+</Note>
+
+The split algorithm targets chunk volume rather than document count, so a small number of very large PDFs does not push an entire split over the target ratio. It also enforces a minimum of three source documents per holdout split to avoid single-document validation or test sets.
+
+## Chunk Metadata Fields
+
+Each record in `chunks.jsonl` and in the LM split files carries the following fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `chunk_id` | `string` | Stable identifier in the format `{pdf_slug}_{00001}`, unique within a run. |
+| `source_pdf` | `string` | Filename of the source PDF. |
+| `source_path` | `string` | Path to the source PDF relative to the project root. |
+| `pdf_id` | `string` | Slugified PDF identifier matching `inventory.json`. |
+| `pages` | `list[int]` | Sorted list of 1-indexed page numbers that contributed text to this chunk. |
+| `text` | `string` | Cleaned, whitespace-normalized chunk text. |
+| `section` | `string` | Detected section heading at the start of the chunk's page group. |
+| `section_type` | `string` | Classified section role: `clinical_content`, `recommendations`, `methodology`, `introduction`, `references`, `appendix`, `glossary`, `index`, or `unknown`. |
+| `content_role` | `string` | Fine-grained content role: `evidence`, `recommendation`, `procedure`, `diagnostic`, `treatment`, `background`, `navigation`, `administrative`, or `unknown`. |
+| `topics` | `list[string]` | Clinical topic tags from the 18-topic taxonomy (see Content Enrichment below). |
+| `token_estimate` | `int` | Estimated token count (`words × 1.35`). |
+| `clinical_score` | `int` | Clinical relevance score based on matched domain terms and action verbs. |
+| `doc_type` | `string` | Source document type inherited from the manifest: `gpc`, `protocol`, `manual`, `article`, `book`, `guide`, or `unknown`. |
+| `quality_flags` | `list[string]` | Optional diagnostic flags such as `short_chunk`, `reference_heavy`, or `numeric_or_table_heavy`. |
+| `language` | `string` | Detected language (`"es"` or `"unknown"`). |
+
+The LM split files wrap each chunk's text and metadata under `{"text": "...", "metadata": {...}}`.
+
+## Content Enrichment
+
+After chunking and deduplication, every chunk is enriched by logic drawn from `content_enrichment.py` (consolidated in `utils.py`). The enrichment step assigns three fields:
+
+- **`section_type`** — classified from the detected section heading using keyword lookup against eight category groups (index, introduction, methodology, clinical content, recommendations, references, appendix, glossary). Falls back to text-based keyword matching and then to clinical score if the heading is absent.
+- **`content_role`** — scored against role-specific keyword lists (evidence, recommendation, procedure, diagnostic, treatment, background, navigation, administrative). Requires a clear keyword majority before assigning a non-default role.
+- **`topics`** — matched against a fixed 18-topic clinical taxonomy. Each topic is checked independently so a chunk can carry multiple tags.
+
+The 18 topics in the taxonomy are: `hemorrhage`, `preeclampsia`, `diabetes_gestational`, `preterm_labor`, `infection`, `cesarean`, `vaginal_birth`, `newborn_care`, `contraception`, `menopause`, `infertility`, `prenatal_care`, `postpartum`, `fetal_monitoring`, `labor_induction`, `gynecologic_oncology`, `ultrasound`, and `genetics`.
+
+Chunks with `content_role` of `"navigation"` or `"administrative"` are excluded from the final LM exports by the `filter_lm_chunks` step before splitting.
+
+## Output Files
+
+- **`datasets/obstetrics/lm/train_lm.jsonl`** — training split records.
+- **`datasets/obstetrics/lm/validation_lm.jsonl`** — validation split records.
+- **`datasets/obstetrics/lm/test_lm.jsonl`** — test split records.
+- **`artifacts/obstetrics/corpus/chunks.jsonl`** — full enriched chunk list prior to LM filtering and splitting, useful for downstream Q&A generation.
+- **`artifacts/obstetrics/reports/build_report.json`** — detailed audit report including topic distributions, content role distributions, doc type distributions, language distributions, leakage detection results, and deduplication statistics per split.
+
+## Corpus Statistics
+
+| Metric | Value |
+|---|---|
+| Train chunks | 1,744 |
+| Validation chunks | 101 |
+| Test chunks | 108 |
+| Total published | 2,223 |
+| Total audited (chunks.jsonl) | 2,268 |

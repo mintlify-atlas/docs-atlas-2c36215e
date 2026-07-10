@@ -1,0 +1,77 @@
+---
+title: "clean_text.py — Clinical Text Cleaning and Filtering"
+sidebarTitle: "clean_text.py"
+description: "Filter and clean raw page text from clinical PDFs, removing headers, footers, TOC pages, short text, and reference-heavy pages to produce a clean corpus."
+---
+
+`clean_text.py` processes `raw_pages.jsonl` and filters out document noise without aggressively normalizing clinical content. The goal is to remove structural artifacts while preserving the medical substance of each page. Every page in the output — whether kept or dropped — retains a full audit record explaining the outcome, making it easy to inspect filtering decisions and adjust thresholds.
+
+## Usage
+
+```bash
+python scripts/clean_text.py \
+  --input artifacts/obstetrics/corpus/raw_pages.jsonl \
+  --output artifacts/obstetrics/corpus/clean_pages.jsonl \
+  --report-output artifacts/obstetrics/reports/cleaning_report.json \
+  --inventory artifacts/obstetrics/metadata/inventory.json \
+  --header-threshold-ratio 0.28 \
+  --include-dropped
+```
+
+All paths default to the standard project layout. Run the script with no arguments to use defaults end-to-end.
+
+## CLI Flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--input` | `Path` | `artifacts/obstetrics/corpus/raw_pages.jsonl` | Path to the raw pages JSONL produced by `extract_pdfs.py`. |
+| `--output` | `Path` | `artifacts/obstetrics/corpus/clean_pages.jsonl` | Destination for the cleaned pages JSONL. |
+| `--report-output` | `Path` | `artifacts/obstetrics/reports/cleaning_report.json` | Destination for the per-run cleaning statistics report. |
+| `--inventory` | `Path` | `artifacts/obstetrics/metadata/inventory.json` | Document manifest used to identify and skip excluded PDFs. |
+| `--header-threshold-ratio` | `float` | `0.28` | A line appearing in at least this fraction of pages within a PDF is treated as a repeated header or footer and stripped. |
+| `--include-dropped` | flag | `True` (on) | When set, dropped pages are written to the output with `is_kept: false`. Pass `--no-include-dropped` to write only kept pages. |
+
+## What Gets Removed
+
+The cleaning step filters pages that match any of the following conditions:
+
+- **Manifest-excluded documents** — PDFs whose `inclusion_status` is `excluded` in `inventory.json` are skipped entirely before any per-page logic runs.
+- **Repeated headers and footers** — lines appearing across at least `--header-threshold-ratio` of pages within the same PDF are identified as structural repeats and stripped from all pages in that document.
+- **Page numbers and administrative labels** — standalone numeric lines and label patterns such as `Página | 12` are removed during text cleaning.
+- **Table of contents pages** — pages whose opening text contains index terms (`índice`, `tabla de contenido`, `contenido`, `sumario`) and that have dot-leader patterns or a low clinical score are dropped with reason `index_or_table_of_contents`.
+- **Reference-dominated pages** — pages with a reference line ratio ≥ 0.45 and a clinical score below 6, or with five or more reference markers and a clinical score below 10, are dropped as `reference_heavy`.
+- **Fragmented text** — pages where at least 72% of lines are 28 characters or shorter and the clinical score is below 5 are dropped as `fragmented_text`.
+- **Short pages** — pages with fewer than 180 characters or fewer than 25 words after cleaning are dropped as `too_short`.
+- **OCR-flagged pages** — pages with `needs_ocr: true` and a post-cleaning character count below 180 are dropped as `needs_ocr`.
+- **Cover and credits pages** — early pages (page ≤ 2) containing terms like `isbn`, `copyright`, or `editorial` and scoring below 3 on clinical content are dropped as `cover_or_credits`.
+- **Non-clinical sections** — pages whose first lines include a heading from the drop list (`referencias`, `bibliografía`, `agradecimientos`, `financiamiento`, etc.) are dropped as `non_clinical_section`.
+- **Corrupt extraction** — pages where suspicious extraction characters (`‡ƒ¦„¥‚┫`) exceed 1.8% of total characters are dropped as `corrupt_extraction`.
+
+## Per-Page Audit Metadata
+
+Every page written to the output carries a full audit record alongside its text:
+
+| Field | Description |
+|---|---|
+| `is_kept` | `true` if the page passed all filters; `false` if it was dropped. |
+| `drop_reason` | Short token explaining why the page was dropped (e.g., `too_short`, `reference_heavy`, `needs_ocr`). Empty string when kept. |
+| `section` | Most recent section heading detected for this page, propagated forward through the document. |
+| `extraction_method` | Extractor that produced the page text (`"pymupdf"` or `"pdfplumber"`). |
+| `doc_type` | Document type from the manifest or extraction phase. |
+| `inclusion_status` | Document-level inclusion status from the manifest. |
+| `exclusion_reason` | Document-level exclusion reason when applicable. |
+| `needs_ocr` | Whether the page was flagged as needing OCR during extraction. |
+| `metrics` | Object with `char_count`, `word_count`, `line_count`, `reference_line_ratio`, `clinical_score`, `suspicious_char_ratio`, and `reference_marker_count`. |
+
+## Output Files
+
+- **`artifacts/obstetrics/corpus/clean_pages.jsonl`** — one record per page (kept and dropped, unless `--no-include-dropped` is passed), with full audit metadata.
+- **`artifacts/obstetrics/reports/cleaning_report.json`** — aggregate statistics including total pages processed, pages kept and dropped, drop reason breakdown by label, and the repeated-lines dictionary by PDF.
+
+## Cleaning Statistics
+
+Across the full MaternaQA-es corpus, the cleaning step processes **5,856 extracted pages** and retains **5,176 pages**, yielding an **88.4% retention rate**. Dropped pages are primarily flagged for being too short, reference-heavy, or belonging to excluded documents.
+
+<Note>
+The cleaning step does NOT apply aggressive text normalization. Medical abbreviations, clinical terminology, hyphenated compound words, and document structure are preserved intentionally. Only structural noise — repeated lines, page numbers, and non-clinical boilerplate — is removed. Downstream token estimates and clinical scores are computed on this lightly-cleaned text.
+</Note>

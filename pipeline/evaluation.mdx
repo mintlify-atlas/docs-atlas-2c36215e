@@ -1,0 +1,131 @@
+---
+title: "Dataset Evaluation with Ragas and Model Benchmarking"
+sidebarTitle: "Evaluation"
+description: "How MaternaQA-es is evaluated: Ragas faithfulness and relevancy metrics, model prediction evaluation, and the experiment consolidation workflow."
+---
+
+Evaluation in MaternaQA-es is separated into two distinct layers: formal dataset quality evaluation with Ragas, and model performance evaluation after fine-tuning. This separation is intentional. Dataset quality is assessed once on the published splits using a fixed stratified sample and a fixed seed, producing stable, reproducible numbers that describe the artifact itself. Model quality is assessed separately after training, comparing base and fine-tuned variants against the held-out test split.
+
+## Formal Dataset Evaluation — Ragas
+
+`evaluate_qa_with_ragas.py` uses **ragas==0.4.3** to evaluate stratified samples from each split. Evaluation is run against the `raw.jsonl` files produced by `generate_synthetic_qa.py`, which contain the source chunk context alongside each Q&A pair.
+
+**Two formal metrics are reported:**
+
+| Metric | Interpretation |
+|---|---|
+| **Faithfulness** (`ragas_faithfulness`) | How well the answer is supported by the source context chunk. A score of 1.0 means every claim in the answer is traceable to the context. |
+| **Answer Relevancy** (`ragas_answer_relevancy`) | How directly and completely the answer addresses the question. |
+
+`context_precision` is intentionally excluded: it evaluates retrieval ranking across multiple candidate contexts, which does not apply here because every Q&A pair was generated from a single known source chunk — there is no retriever to evaluate.
+
+The evaluation uses `--sample-size` to control cost and `--seed` to make sampling reproducible across runs.
+
+## Ragas Results
+
+Stratified sampling was used to select evaluation subsets from each split, with `seed=42` for reproducibility:
+
+| Split | Sample | Faithfulness | Answer Relevancy |
+|---|---|---|---|
+| Train | 300 / 5,093 | **0.7726** | **0.6466** |
+| Validation | 100 / 306 | **0.7826** | **0.6812** |
+| Test | 100 / 328 | **0.7132** | **0.5583** |
+
+## Run Ragas Evaluation
+
+```bash
+python scripts/evaluate_qa_with_ragas.py --input datasets/obstetrics/qa/final/train/raw.jsonl
+```
+
+Additional flags for controlling evaluation scope:
+
+```bash
+python scripts/evaluate_qa_with_ragas.py \
+  --input datasets/obstetrics/qa/final/train/raw.jsonl \
+  --sample-size 300 \
+  --seed 42 \
+  --custom-judge-model gpt-5.4-mini \
+  --output datasets/obstetrics/qa/final/ragas_results/final_train_sample300_eval.json
+```
+
+## Model Prediction Evaluation
+
+After running inference with `inference_base.py` (for base models) or `inference_qlora.py` (for fine-tuned adapters), `evaluate_model_predictions.py` evaluates each model's predictions against the reference answers and source context from `test.jsonl`.
+
+**Generating baseline predictions:**
+
+```bash
+python scripts/inference_base.py \
+  --model-name google/gemma-4-E2B-it \
+  --output-prefix outputs/gemma4-base/test
+
+python scripts/inference_base.py \
+  --model-name google/medgemma-1.5-4b-it \
+  --output-prefix outputs/medgemma-base/test
+```
+
+**Generating predictions from fine-tuned adapters:**
+
+```bash
+python scripts/inference_qlora.py \
+  --adapter-dir outputs/gemma4-grounded \
+  --output-prefix outputs/gemma4-grounded/test
+
+python scripts/inference_qlora.py \
+  --adapter-dir outputs/medgemma-grounded \
+  --output-prefix outputs/medgemma-grounded/test
+```
+
+**Evaluating predictions:**
+
+```bash
+python scripts/evaluate_model_predictions.py \
+  --input outputs/gemma4-base/test_predictions.jsonl \
+  --output outputs/gemma4-base/test_eval.json
+```
+
+The inference scripts write predictions to JSONL incrementally. If a run is interrupted, re-running the same command resumes from the last completed `qa_id`. Pass `--no-resume` to regenerate from scratch.
+
+## Evaluation Output Formats
+
+Evaluation results are stored in two formats per model:
+
+- `outputs/<model-name>/test_eval.json` — full evaluation record in JSON
+- `outputs/<model-name>/test_eval.jsonl` — line-delimited records for streaming analysis
+
+**CSV export** via `convert_eval_to_csv.py` produces three comparison files:
+
+```text
+csv_outputs/master_eval.csv       # All predictions with per-pair metrics
+csv_outputs/model_summary.csv     # Aggregate metrics per model
+csv_outputs/wide_comparison.csv   # Side-by-side metric comparison across models
+```
+
+## Experiment Consolidation
+
+`consolidate_qa_experiments.py` merges results from multiple model comparison experiments stored under `artifacts/obstetrics/qa_experiments/model_comparison/`. It produces a unified JSON report and a Markdown summary table covering all experiments, enabling direct comparison of generation and verification model combinations.
+
+## Model Comparison Experiments in the Repo
+
+The repository includes four completed experiment directories under `artifacts/obstetrics/qa_experiments/model_comparison/`, each testing a different combination of generator and evaluator model:
+
+| Experiment | Generator | Evaluator |
+|---|---|---|
+| A (`A_gpt54_gen_gpt55_eval`) | gpt-5.4 | gpt-5.5 |
+| B (`B_gpt54mini_gen_gpt55_eval`) | gpt-5.4-mini | gpt-5.5 |
+| C (`C_gpt52_gen_gpt55_eval`) | gpt-5.2 | gpt-5.5 |
+| D (`D_gpt54_gen_gpt54mini_eval`) | gpt-5.4 | gpt-5.4-mini |
+
+## Audit Report
+
+`audit_dataset.py` produces a comprehensive integrity report at:
+
+```text
+artifacts/obstetrics/reports/audit_report.json
+```
+
+The report covers:
+
+- **Duplicate detection** — identifies near-duplicate chunks or Q&A pairs across splits
+- **Split statistics** — pair counts, chunk counts, and PDF counts per split
+- **Data integrity checks** — verifies that no source document appears in more than one split, confirming zero data leakage between train, validation, and test

@@ -1,0 +1,148 @@
+---
+title: "train_qlora_trl.py — QLoRA Fine-tuning with TRL and PEFT"
+sidebarTitle: "train_qlora_trl.py"
+description: "Fine-tune Gemma 4 or MedGemma 1.5 4B on MaternaQA-es with QLoRA using TRL and PEFT. Full CLI reference with all flags, defaults, and training configuration."
+---
+
+`train_qlora_trl.py` is the canonical QLoRA training script for MaternaQA-es. It uses TRL's `SFTTrainer` with PEFT LoRA and bitsandbytes 4-bit quantization. The script converts conversational JSONL to prompt/completion format in memory, computing loss only over the completion. This keeps loss masking explicit and avoids depending on model-specific chat templates that may not expose assistant masks.
+
+## Usage
+
+**Smoke test** — validates that the configuration loads, trains, and saves correctly before committing to a full run:
+
+```bash
+python scripts/train_qlora_trl.py \
+  --model-name google/gemma-4-E2B-it \
+  --dataset-variant sft_grounded \
+  --output-dir outputs/smoke-gemma4-e2b-grounded \
+  --max-steps 10 \
+  --train-limit 64 \
+  --eval-limit 32
+```
+
+**Full training — Gemma 4 grounded:**
+
+```bash
+python scripts/train_qlora_trl.py \
+  --model-name google/gemma-4-E2B-it \
+  --dataset-variant sft_grounded \
+  --output-dir outputs/gemma4-e2b-grounded
+```
+
+**Full training — MedGemma 1.5 4B grounded:**
+
+```bash
+python scripts/train_qlora_trl.py \
+  --model-name google/medgemma-1.5-4b-it \
+  --dataset-variant sft_grounded \
+  --output-dir outputs/medgemma-grounded
+```
+
+## All CLI Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--model-name` | `str` | `google/gemma-4-E2B-it` | Hugging Face model ID or local path of the base model. |
+| `--model-class` | `str` | `auto` | Model loading class. `auto` uses `AutoModelForImageTextToText` for Gemma 4/MedGemma and `AutoModelForCausalLM` for all others. Choices: `auto`, `causal-lm`, `image-text-to-text`. |
+| `--dataset-root` | `Path` | `datasets/obstetrics/qa/publication` | Root folder containing the publication variant subdirectories. |
+| `--dataset-variant` | `str` | `sft_grounded` | SFT variant to use for training. Choices: `sft_closed_book`, `sft_grounded`. |
+| `--output-dir` | `Path` | *(required)* | Directory where the LoRA adapter and tokenizer are saved. |
+| `--max-length` | `int` | `1024` | Maximum sequence length for tokenization. |
+| `--num-train-epochs` | `float` | `2.0` | Number of training epochs. |
+| `--max-steps` | `int` | `None` | If set, overrides `--num-train-epochs` and stops training after this many steps. Useful for smoke tests. |
+| `--per-device-train-batch-size` | `int` | `1` | Training batch size per GPU. |
+| `--per-device-eval-batch-size` | `int` | `1` | Evaluation batch size per GPU. |
+| `--gradient-accumulation-steps` | `int` | `8` | Number of steps to accumulate gradients before an optimizer step (effective batch size = 8). |
+| `--learning-rate` | `float` | `2e-4` | AdamW optimizer learning rate. |
+| `--warmup-ratio` | `float` | `0.03` | Fraction of total steps used for linear warmup. |
+| `--weight-decay` | `float` | `0.0` | Weight decay applied to non-bias parameters. |
+| `--max-grad-norm` | `float` | `0.3` | Maximum gradient norm for gradient clipping. |
+| `--lora-r` | `int` | `16` | LoRA rank (number of decomposition dimensions). |
+| `--lora-alpha` | `int` | `16` | LoRA scaling factor (alpha). |
+| `--lora-dropout` | `float` | `0.05` | Dropout probability applied to LoRA layers. |
+| `--logging-steps` | `int` | `10` | Log training metrics every N steps. |
+| `--save-steps` | `int` | `None` | Save a checkpoint every N steps. Only relevant when `--save-strategy steps` is set. |
+| `--eval-steps` | `int` | `None` | Run evaluation every N steps. Only relevant when `--eval-strategy steps` is set. |
+| `--save-strategy` | `str` | `epoch` | When to save checkpoints. Choices: `no`, `steps`, `epoch`. |
+| `--eval-strategy` | `str` | `epoch` | When to run evaluation. Choices: `no`, `steps`, `epoch`. |
+| `--train-limit` | `int` | `None` | Limit the train split to the first N examples. Use for smoke tests. |
+| `--eval-limit` | `int` | `None` | Limit the validation split to the first N examples. Use for smoke tests. |
+| `--seed` | `int` | `3407` | Random seed for reproducibility. |
+| `--assistant-only-loss` | `bool` | `False` | Advanced: use chat template masks to compute loss only on assistant turns. Requires templates with `{% generation %}`. Disabled by default in favor of the explicit `prompt`/`completion` split. |
+| `--packing` | `bool` | `False` | Pack short sequences to improve GPU utilization. Disabled by default to avoid cross-sample contamination on models whose attention does not support safe packing. |
+| `--gradient-checkpointing` | `bool` | `True` | Trade compute for VRAM by recomputing activations during the backward pass. |
+| `--trust-remote-code` | `bool` | `False` | Pass `trust_remote_code=True` to model and tokenizer loaders. Only enable if the model requires it. |
+| `--attn-implementation` | `str` | `None` | Optional attention backend override: `eager`, `sdpa`, `flash_attention_2`, etc. |
+| `--dry-run` | flag | `False` | Load and validate the dataset without loading the model or running training. |
+| `--allow-cpu` | flag | `False` | Allow dry-runs without CUDA. Real QLoRA training always requires an NVIDIA/CUDA GPU. |
+
+## Dataset Variants
+
+| Variant | Input format | Use case |
+|---------|-------------|----------|
+| `sft_grounded` | User message contains `Contexto fuente` followed by the question | Train and evaluate evidence-guided QA behavior; the model receives source context at inference time |
+| `sft_closed_book` | User message contains only the clinical question | Measure domain adaptation without explicit context; the model must answer from its learned parameters alone |
+
+## Training Configuration
+
+The script builds a QLoRA setup using the following fixed configuration, derived directly from the source:
+
+- **4-bit NF4 quantization** via `BitsAndBytesConfig`: `load_in_4bit=True`, `bnb_4bit_quant_type="nf4"`, `bnb_4bit_use_double_quant=True`
+- **Compute dtype**: `bfloat16` on Ampere+ GPUs (compute capability ≥ 8); `float16` on older CUDA devices
+- **LoRA rank**: `r=16`, `lora_alpha=16`, `lora_dropout=0.05`, `bias="none"`
+- **Target modules**: `"all-linear"` — adapters are applied to all linear layers in the model
+- **Task type**: `CAUSAL_LM`
+- **Optimizer**: `adamw_8bit` (8-bit AdamW for additional VRAM savings)
+- **LR scheduler**: `cosine`
+- **Gradient checkpointing**: enabled by default with `use_reentrant=False`
+- **Loss masking**: `completion_only_loss=True` — loss is computed only over the assistant (completion) portion, not the prompt
+- **TensorBoard reporting**: enabled; logs written to `runs/` inside `--output-dir`
+- **Sequence packing**: disabled by default
+
+## Model Class Handling
+
+The `--model-class` flag controls which Transformers class is used to load the base model:
+
+| Value | Class used | When to use |
+|-------|-----------|-------------|
+| `auto` | Determined by model name heuristic | Default; uses `AutoModelForImageTextToText` for any model name containing `gemma-4` or `medgemma`, and `AutoModelForCausalLM` for everything else |
+| `image-text-to-text` | `AutoModelForImageTextToText` | Explicit override for Gemma 4 and MedGemma checkpoints |
+| `causal-lm` | `AutoModelForCausalLM` | Override for models that fail with an architecture error under `image-text-to-text` |
+
+If MedGemma 1.5 raises an architecture mismatch error, add `--model-class causal-lm` as a workaround:
+
+```bash
+python scripts/train_qlora_trl.py \
+  --model-name google/medgemma-1.5-4b-it \
+  --dataset-variant sft_grounded \
+  --output-dir outputs/medgemma-grounded \
+  --model-class causal-lm
+```
+
+## Outputs
+
+After training completes, the following are saved to `--output-dir`:
+
+- `adapter_config.json` — LoRA adapter configuration (rank, alpha, target modules, base model path)
+- `adapter_model.safetensors` — trained LoRA adapter weights
+- `tokenizer.json` — full tokenizer vocabulary and merge rules
+- `tokenizer_config.json` — tokenizer metadata and special token mappings
+- `chat_template.jinja` — the chat template saved alongside the tokenizer
+- `training_args.bin` — serialized `SFTConfig` training arguments for reproducibility
+- `runs/` — TensorBoard event files (loss, learning rate, evaluation metrics per step)
+- `checkpoint-N/` — intermediate checkpoints saved according to `--save-strategy` (one per epoch by default)
+
+## Recommended Experiments
+
+The publication README defines a four-experiment matrix using the canonical TRL + PEFT + bitsandbytes (QLoRA) route:
+
+| Model family | Dataset variant | Training route | Purpose |
+|-------------|----------------|---------------|---------|
+| Gemma 4 instruct | `sft_grounded` | TRL + PEFT + bitsandbytes (QLoRA) | Measure evidence-guided QA on a general instruction-tuned model |
+| Gemma 4 instruct | `sft_closed_book` | TRL + PEFT + bitsandbytes (QLoRA) | Measure domain adaptation without context |
+| MedGemma 1.5 4B IT | `sft_grounded` | TRL + PEFT + bitsandbytes (QLoRA) | Measure evidence-guided QA on a medical instruct model |
+| MedGemma 1.5 4B IT | `sft_closed_book` | TRL + PEFT + bitsandbytes (QLoRA) | Measure domain adaptation on a medical model without context |
+
+<Warning>
+Requires an NVIDIA GPU with at least 16 GB VRAM. QLoRA with bitsandbytes will not run on CPU — the script exits with an error if CUDA is unavailable (unless `--dry-run --allow-cpu` is used for dataset validation only). Full fine-tuning is not the target: only the QLoRA adapter weights are saved to `--output-dir`, not the full model.
+</Warning>

@@ -1,0 +1,73 @@
+---
+title: "extract_pdfs.py — PDF Text Extraction Script"
+sidebarTitle: "extract_pdfs.py"
+description: "Extract text and metadata from clinical PDFs using PyMuPDF and pdfplumber. Outputs raw_pages.jsonl and inventory.json for downstream corpus processing."
+---
+
+`extract_pdfs.py` is the first step in the MaternaQA-es corpus pipeline. It reads clinical PDFs from the input directory and extracts text at the page level, using PyMuPDF as the primary extractor and pdfplumber as a fallback for low-yield pages. Every page becomes a structured record that carries its source provenance, extraction metadata, and an OCR flag — enabling full traceability from raw PDF to final dataset.
+
+## Usage
+
+```bash
+python scripts/extract_pdfs.py \
+  --input-dir pdfs/obstetrics \
+  --output artifacts/obstetrics/corpus/raw_pages.jsonl \
+  --inventory-output artifacts/obstetrics/metadata/inventory.json \
+  --min-fallback-chars 120 \
+  --min-ocr-chars 80 \
+  --recursive \
+  --pdf path/to/specific.pdf
+```
+
+All flags have defaults sourced from `utils.py` path helpers, so the script can be invoked with no arguments and will read from `pdfs/obstetrics/` and write to `artifacts/obstetrics/`.
+
+## CLI Flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--input-dir` | `Path` | `pdfs/obstetrics/` | Directory to scan for PDF files. Ignored when `--pdf` is provided. |
+| `--output` | `Path` | `artifacts/obstetrics/corpus/raw_pages.jsonl` | Destination path for the per-page JSONL output. |
+| `--inventory-output` | `Path` | `artifacts/obstetrics/metadata/inventory.json` | Destination path for the document manifest JSON. |
+| `--min-fallback-chars` | `int` | `120` | Character threshold below which pdfplumber fallback extraction is attempted for a page. |
+| `--min-ocr-chars` | `int` | `80` | Character threshold below which a page is flagged `needs_ocr` after both extractors have run. |
+| `--recursive` | flag | `False` | If set, scans `--input-dir` recursively with `rglob`. Omit the flag or pass `--no-recursive` to disable. |
+| `--pdf` | `Path` (repeatable) | `[]` | Process one or more specific PDFs instead of scanning `--input-dir`. Pass the flag multiple times for multiple files. |
+
+## Extraction Logic
+
+Each page is processed in two stages:
+
+1. **PyMuPDF (primary)** — text blocks are extracted, sorted by vertical then horizontal position, and joined with double newlines to preserve reading order. This is fast and reliable for digitally-born PDFs.
+2. **pdfplumber fallback** — if the cleaned character count from PyMuPDF falls below `--min-fallback-chars` (default `120`), pdfplumber re-extracts the page using its layout-aware engine. The result replaces the PyMuPDF output only when it yields more characters.
+
+After both stages, any page whose cleaned character count is still below `--min-ocr-chars` (default `80`) is flagged with `needs_ocr: true`. **OCR is not performed automatically** in the current pipeline — these pages are carried forward in `raw_pages.jsonl` but are excluded from the clean corpus in the next step.
+
+The `extraction_method` field on each record records which extractor produced the final text (`"pymupdf"` or `"pdfplumber"`).
+
+## Output Files
+
+- **`artifacts/obstetrics/corpus/raw_pages.jsonl`** — one JSON record per page, containing the extracted text and all provenance metadata.
+- **`artifacts/obstetrics/metadata/inventory.json`** — document-level manifest with per-PDF metadata including doc type, inclusion status, OCR summary, and page-level OCR flags.
+
+## raw_pages.jsonl Record Schema
+
+Each line in `raw_pages.jsonl` is a JSON object with the following fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `pdf_id` | `string` | Slugified identifier derived from the PDF filename. |
+| `source_pdf` | `string` | Original PDF filename (e.g., `guia_prenatal.pdf`). |
+| `source_path` | `string` | Path to the PDF relative to the project root. |
+| `file_size` | `int` | PDF file size in bytes. |
+| `page_count` | `int` | Total number of pages in the source PDF. |
+| `page` | `int` | 1-indexed page number within the document. |
+| `text` | `string` | Raw extracted text for this page (before cleaning). |
+| `char_count` | `int` | Character count of the cleaned text used for extraction metrics. |
+| `word_count` | `int` | Word count of the cleaned text. |
+| `extraction_method` | `string` | Extractor used: `"pymupdf"` or `"pdfplumber"`. |
+| `needs_ocr` | `bool` | `true` if the page yielded fewer than `--min-ocr-chars` characters after both extractors. |
+| `doc_type` | `string` | Document type classification (e.g., `"gpc"`, `"protocol"`, `"manual"`, `"article"`, `"book"`, `"guide"`, `"unknown"`). |
+
+<Note>
+OCR is flagged but not performed in the current pipeline. Pages with `needs_ocr: true` are carried through to `raw_pages.jsonl` intact, but `clean_text.py` excludes any page where `needs_ocr` is `true` and the character count remains below 180 after cleaning. If you need OCR coverage, run an OCR pass before extraction or process the flagged pages externally and merge the results.
+</Note>

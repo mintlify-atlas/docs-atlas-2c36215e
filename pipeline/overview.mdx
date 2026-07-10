@@ -1,0 +1,107 @@
+---
+title: "MaternaQA-es Pipeline: From PDFs to Published Dataset"
+sidebarTitle: "Overview"
+description: "The MaternaQA-es pipeline transforms clinical PDFs into a traceable Q&A dataset in 8 reproducible steps, from source curation to Hugging Face publication."
+---
+
+The MaternaQA-es pipeline is an 8-step reproducible process that turns raw clinical PDFs into a published, auditable Spanish-language Q&A dataset. Every intermediate artifact — raw pages, clean pages, chunks, Q&A pairs, and evaluation reports — is written to disk so the entire construction chain is traceable back to its source documents. Running the pipeline from scratch produces byte-identical outputs given the same inputs and seed, making the dataset creation process fully reproducible for peer review and extension.
+
+## The 8 Pipeline Steps
+
+<Steps>
+  <Step title="Source Curation">
+    Clinical PDFs are selected and documented in a manifest (`document_manifest.py`). Each PDF is registered with its filename, path, size, page count, document type, inclusion status, language, and any pages flagged for potential OCR. Excluded documents record a reason for exclusion, keeping the selection process auditable.
+  </Step>
+  <Step title="Text Extraction">
+    `extract_pdfs.py` reads each PDF page-by-page. The primary extractor is **PyMuPDF**, which provides fast and stable block-level text parsing. When a page yields too little content, **pdfplumber** acts as a layout-aware fallback. Pages that remain below the minimum character threshold after both methods are flagged `needs_ocr` and preserved in the inventory for manual review.
+  </Step>
+  <Step title="Cleaning and Filtering">
+    `clean_text.py` removes documentary noise without aggressively normalizing clinical content. Pages with repeated headers and footers, page numbers, table-of-contents content, reference-heavy sections, fragmented extraction artifacts, or OCR-required content are marked and dropped. Every page retains an audit record — `is_kept`, `drop_reason`, section type, extraction method, and document type — for downstream inspection.
+  </Step>
+  <Step title="Document Segmentation (Chunking)">
+    `build_lm_dataset.py` groups clean pages into clinically-useful chunks with configurable token limits and overlap. Chunk boundaries respect document structure so that each unit contains enough context for Q&A generation without exceeding model input limits. Every chunk receives a stable `chunk_id`, source PDF, page range, clean text, section type, content role, clinical topics, token estimate, and clinical score.
+  </Step>
+  <Step title="Topic Enrichment">
+    `content_enrichment.py` assigns clinical scores and topic tags to each chunk from the 18-topic taxonomy (`prenatal_care`, `postpartum`, `preterm_labor`, `labor_induction`, `vaginal_birth`, `cesarean`, `hemorrhage`, `preeclampsia`, `diabetes_gestational`, `infection`, `fetal_monitoring`, `newborn_care`, `ultrasound`, `genetics`, `contraception`, `infertility`, `menopause`, `gynecologic_oncology`). The `clinical_score` gates which chunks are eligible for Q&A generation.
+  </Step>
+  <Step title="Synthetic Q&A Generation">
+    `generate_synthetic_qa.py` uses **OpenAI Structured Outputs** to generate clinically-grounded Spanish Q&A pairs from enriched corpus chunks. The async pipeline processes all eligible chunks concurrently and writes resumable checkpoints so interrupted runs can continue without duplicating work. Six question types — factual, definicion, comparacion, razonamiento, aplicacion, and hipotetico — are generated across three difficulty levels.
+  </Step>
+  <Step title="Quality Control">
+    Quality is assessed in two layers. A **custom operational judge** estimates faithfulness, answer relevancy, roundtrip consistency, and issues a quality verdict for each pair during generation. **Ragas** (`evaluate_qa_with_ragas.py`) then provides formal, comparable metrics over stratified samples from each split. The two layers serve distinct roles: the judge filters and diagnoses during construction; Ragas provides the reportable evaluation.
+  </Step>
+  <Step title="Publication Preparation">
+    `prepare_qa_publication_variants.py` exports three clean variants from the audited Q&A files: `sft_closed_book` (question → answer, for parametric fine-tuning), `sft_grounded` (context + question → answer, for evidence-grounded fine-tuning), and `qa_flat_jsonl` (flat records with full metadata, for auditing and RAG evaluation). Internal evaluation fields are removed from the publication variants.
+  </Step>
+</Steps>
+
+## Run the Full Pipeline
+
+To rebuild the entire corpus from PDF extraction through audit reports in one command:
+
+```bash
+python scripts/run_full_pipeline.py
+```
+
+To also trigger synthetic Q&A generation as part of the full build, add `--generate-qa`:
+
+```bash
+python scripts/run_full_pipeline.py --generate-qa
+```
+
+## Run Incrementally
+
+```bash
+python scripts/run_incremental.py --recursive
+```
+
+The incremental runner detects new or changed PDFs in the source directory and processes only those, leaving existing artifacts untouched. Use this when adding documents to an existing corpus build to avoid re-processing all 63 source PDFs.
+
+## Pipeline Outputs
+
+<CardGroup cols={2}>
+  <Card title="Corpus LM" icon="database">
+    `datasets/obstetrics/lm/`
+
+    Train, validation, and test JSONL files containing annotated chunks ready for language model training and Q&A generation.
+  </Card>
+  <Card title="QA Final" icon="circle-check">
+    `datasets/obstetrics/qa/final/`
+
+    Per-split Q&A artifacts: `raw.jsonl` (auditable pairs with full metadata), `sft.jsonl` (messages format), `progress.json`, and `generation_report.json`.
+  </Card>
+  <Card title="Publication Variants" icon="upload">
+    `datasets/obstetrics/qa/publication/`
+
+    Three clean publication-ready variants: `sft_closed_book/`, `sft_grounded/`, and `qa_flat_jsonl/` — each split into train, validation, and test files.
+  </Card>
+  <Card title="Audit Reports" icon="file-magnifying-glass">
+    `artifacts/obstetrics/reports/`
+
+    Cleaning report, build report, table extraction report, and the final audit report covering duplicate detection, split statistics, and integrity checks.
+  </Card>
+</CardGroup>
+
+## Full Pipeline Flags
+
+The following arguments are accepted by `run_full_pipeline.py` to control corpus construction behavior:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--input-dir` | `pdfs/obstetrics/` | Source directory containing clinical PDFs |
+| `--validation-ratio` | `0.05` | Fraction of documents assigned to the validation split |
+| `--test-ratio` | `0.05` | Fraction of documents assigned to the test split |
+| `--seed` | `42` | Random seed for reproducible document-level splits |
+| `--min-clinical-score` | `5` | Minimum clinical score required to include a chunk |
+| `--min-tokens` | `500` | Minimum token count for a chunk to be published |
+| `--max-tokens` | `1200` | Maximum token count per chunk before splitting |
+| `--overlap-tokens` | `80` | Token overlap between consecutive chunks |
+| `--generate-qa` | `false` | When set, runs the synthetic QA generation step (requires `OPENAI_API_KEY`) |
+
+## Detailed Documentation
+
+For a deeper look at each phase, see the dedicated pages:
+
+- [Corpus Construction](/pipeline/corpus-construction) — PDF extraction, page cleaning, chunking, and topic enrichment
+- [QA Generation](/pipeline/qa-generation) — Synthetic Q&A generation with OpenAI Structured Outputs
+- [Evaluation](/pipeline/evaluation) — Ragas formal evaluation and model benchmarking

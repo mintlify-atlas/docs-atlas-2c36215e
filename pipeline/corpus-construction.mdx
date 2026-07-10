@@ -1,0 +1,128 @@
+---
+title: "Corpus Construction: PDF Extraction, Cleaning, and Chunking"
+sidebarTitle: "Corpus Construction"
+description: "How MaternaQA-es constructs its clinical corpus: PDF text extraction with PyMuPDF and pdfplumber, page cleaning, document chunking, and topic enrichment."
+---
+
+Three scripts turn raw clinical PDFs into annotated, split-ready chunks: `extract_pdfs.py`, `clean_text.py`, and `build_lm_dataset.py`. Each step produces auditable intermediate files that allow any stage of the pipeline to be inspected, re-run, or extended independently. A fourth script, `content_enrichment.py`, assigns clinical scores and topic tags before the chunks are published.
+
+## Step 1: Text Extraction
+
+`extract_pdfs.py` processes every PDF in the source directory page by page. Two extraction methods are applied in sequence:
+
+- **Primary — PyMuPDF**: fast, stable block-level text parsing that preserves text order and layout signals.
+- **Fallback — pdfplumber**: invoked when a page produces too few characters with PyMuPDF. pdfplumber uses a layout-aware approach to recover text from complex column arrangements and dense formatting.
+
+Pages that yield too few characters after both methods are flagged `needs_ocr`. These pages are recorded in the inventory for tracking but are not sent through an automatic OCR step in the current pipeline.
+
+**Outputs:**
+
+```text
+artifacts/obstetrics/corpus/raw_pages.jsonl
+artifacts/obstetrics/metadata/inventory.json
+```
+
+`raw_pages.jsonl` contains one JSON record per page with raw text and extraction metadata. `inventory.json` is the document-level manifest recording each PDF's inclusion status, page count, document type, language, and any OCR flags.
+
+## Step 2: Cleaning and Filtering
+
+`clean_text.py` removes documentary noise without aggressively normalizing clinical language. The goal is to retain the medical content of each page while discarding elements that would degrade chunk quality or introduce training noise.
+
+**What gets removed or flagged:**
+
+- Repeated headers and footers
+- Page numbers and administrative labels
+- Table-of-contents and index pages
+- Sections dominated by bibliographic references
+- Text fragmented by poor extraction layout
+- Pages that are too short to be clinically meaningful
+- Pages requiring OCR that were not recovered by the fallback
+
+**What each retained page records:**
+
+Every page — kept or dropped — carries a full audit record:
+
+| Field | Description |
+|---|---|
+| `is_kept` | Whether the page passed all filters |
+| `drop_reason` | If dropped, the specific rule that triggered exclusion |
+| `section_type` | Detected section category (e.g., `body`, `references`, `toc`) |
+| `extraction_method` | Which extractor produced the final text (`pymupdf` or `pdfplumber`) |
+| `document_type` | Category of the source PDF (guideline, protocol, manual, etc.) |
+
+**Output:**
+
+```text
+artifacts/obstetrics/corpus/clean_pages.jsonl
+```
+
+## Corpus Statistics After Cleaning
+
+| Metric | Value |
+|---|---|
+| PDFs processed | 63 |
+| Pages extracted | 5,856 |
+| Pages retained | 5,176 (88.4%) |
+
+## Step 3: Chunking — `build_lm_dataset.py`
+
+Clean pages are grouped into chunks with configurable token limits and overlap. Chunking aims to produce units that are long enough to ground a Q&A pair in meaningful clinical context, but short enough to fit within model input windows.
+
+Each chunk carries a complete metadata envelope:
+
+- A stable `chunk_id` derived from the source document and position
+- Source PDF filename and the page numbers it spans
+- Clean text content
+- Detected section type and content role
+- Clinical topics inferred during enrichment
+- Token count estimate
+- Clinical score
+
+**Key flags for `build_lm_dataset.py`:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--min-tokens` | `500` | Chunks below this token count are excluded |
+| `--max-tokens` | `1200` | Chunks exceeding this limit are split further |
+| `--overlap-tokens` | `80` | Tokens carried over from the previous chunk |
+| `--min-clinical-score` | `5` | Minimum clinical score required to publish a chunk |
+
+## Step 4: Topic Enrichment — `content_enrichment.py`
+
+After chunking, `content_enrichment.py` assigns a `clinical_score` and a list of `topics` to each chunk. Topics are drawn from the 18-topic taxonomy that defines the thematic coverage of the corpus:
+
+`prenatal_care` · `postpartum` · `preterm_labor` · `labor_induction` · `vaginal_birth` · `cesarean` · `hemorrhage` · `preeclampsia` · `diabetes_gestational` · `infection` · `fetal_monitoring` · `newborn_care` · `ultrasound` · `genetics` · `contraception` · `infertility` · `menopause` · `gynecologic_oncology`
+
+The `clinical_score` gates eligibility for Q&A generation: only chunks meeting the `--min-clinical-score` threshold proceed to `generate_synthetic_qa.py`.
+
+## Document-Level Splitting
+
+<Note>
+Train, validation, and test splits are assigned at the **document level**, not at the page or chunk level. All chunks derived from a given PDF land in exactly one split, so there is zero contamination between train and evaluation data. The final corpus contains 63 source PDFs distributed across 52 training documents, 2 validation documents, and 3 test documents (57 PDFs with accepted chunks after filtering).
+</Note>
+
+## Chunk Metadata Fields
+
+| Field | Description |
+|---|---|
+| `chunk_id` | Stable identifier derived from source PDF and position in the document |
+| `source_pdf` | Filename of the originating PDF |
+| `pages` | List of page numbers spanned by this chunk |
+| `text` | Clean text content of the chunk |
+| `section_type` | Detected section category within the source document |
+| `content_role` | Functional role of the content (e.g., `evidence`, `recommendation`, `procedure`) |
+| `topics` | List of clinical topic tags from the 18-topic taxonomy |
+| `token_estimate` | Estimated token count used to scale Q&A pair generation |
+| `clinical_score` | Numeric score reflecting the density of clinical content in the chunk |
+
+## Output Files
+
+The corpus construction pipeline produces three split files under `datasets/obstetrics/lm/`:
+
+```text
+datasets/obstetrics/lm/train_lm.jsonl
+datasets/obstetrics/lm/validation_lm.jsonl
+datasets/obstetrics/lm/test_lm.jsonl
+```
+
+These files are the primary inputs for `generate_synthetic_qa.py` and are also published independently as the MaternaQA-es LM corpus on Hugging Face.

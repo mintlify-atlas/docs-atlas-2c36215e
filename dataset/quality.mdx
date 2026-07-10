@@ -1,0 +1,105 @@
+---
+title: "MaternaQA-es Quality Evaluation and Ragas Metrics"
+sidebarTitle: "Quality"
+description: "MaternaQA-es quality results: Ragas faithfulness and answer relevancy scores, grounding statistics, and question-type distribution by split."
+---
+
+Quality in MaternaQA-es is assessed through two distinct and separate evaluation layers. During dataset construction, an operational custom judge estimates faithfulness, answer relevancy, roundtrip consistency, and a pass/fail quality verdict for each generated pair — this layer drives generation-time filtering and prioritizes pairs for manual review. After construction, a formal Ragas evaluation (v0.4.3) is run on stratified random samples from each published split to produce comparable, reproducible quality metrics. The two layers serve different purposes and should not be conflated when interpreting results.
+
+## Ragas Evaluation Results
+
+Formal quality was measured using stratified sampling over each published split. Ragas `faithfulness` measures how well the answer is supported by the source context. `answer_relevancy` measures how directly the answer addresses the question asked.
+
+| Split | Sample Size | Faithfulness | Answer Relevancy |
+|:------|------------:|-------------:|-----------------:|
+| Train | 300 / 5,093 | **0.7726** | **0.6466** |
+| Validation | 100 / 306 | **0.7826** | **0.6812** |
+| Test | 100 / 328 | **0.7132** | **0.5583** |
+
+Stratified sampling was used to ensure that the evaluated sample is representative of the full distribution of question types, difficulty levels, and source PDFs within each split. The `--seed` flag in `evaluate_qa_with_ragas.py` makes sampling reproducible.
+
+## Grounding Statistics
+
+Source-context grounding is tracked separately from Ragas scores to quantify how tightly answers are anchored to their originating chunks:
+
+- Average context-answer overlap across the full dataset: **0.6836**
+- Pairs flagged as low-grounding: **27** (0.54 % of the total 5,727 pairs)
+
+The low rate of low-grounding flags confirms that the generation pipeline successfully produced answers derived from — rather than extrapolated beyond — the source clinical text.
+
+## Operational Judge Metrics
+
+The following fields are produced by the custom judge that runs during generation, stored in the raw artifacts, and stripped from publication files. They serve as diagnostic signals during data construction, not as formal evaluation results:
+
+- **`faithfulness`** — Estimated probability that the answer is fully supported by the source chunk, scored by the judge model.
+- **`answer_relevancy`** — Estimated probability that the answer directly addresses the question as posed.
+- **`roundtrip_consistency`** — Whether a question regenerated from the answer round-trips back to the original question, indicating internal consistency.
+- **`quality_verdict`** — Binary pass/fail decision used to deprioritize or flag weak pairs during generation.
+- **`quality_reason`** — Free-text explanation for the quality verdict, used for manual review prioritization.
+
+These fields appear as `null` in `datasets/obstetrics/qa/final/<split>/raw.jsonl` for pairs where the operational judge was not invoked or its output was not stored, and are absent from all publication JSONL files.
+
+## Question Type Distribution
+
+Questions span six types to ensure broad coverage of clinical reasoning demands:
+
+| Type | Intent |
+|------|--------|
+| `factual` | Retrieve specific clinical facts. |
+| `definicion` | Explain concepts, conditions, or procedures. |
+| `comparacion` | Differentiate clinical entities or management decisions. |
+| `razonamiento` | Justify causal relationships, risks, or recommendations. |
+| `aplicacion` | Apply knowledge to a described clinical situation. |
+| `hipotetico` | Explore conditional scenarios or case variants. |
+
+The distribution across types is visible in the `tipo` field of every record in all three variants and can be analyzed using the `qa_flat_jsonl/all.jsonl` consolidated file.
+
+## Difficulty Distribution
+
+Each Q&A pair is assigned a difficulty level during generation, reflecting the cognitive demand of the question relative to the source material:
+
+- **`basico`** — Straightforward fact retrieval or simple definitions directly stated in the source chunk.
+- **`intermedio`** — Questions requiring interpretation or connection of multiple statements from the chunk.
+- **`avanzado`** — Questions requiring reasoning, comparison, or application of clinical knowledge from the chunk.
+
+Difficulty is stored in the `dificultad` field across all three publication variants.
+
+## Data Leakage
+
+<Note>
+  All splits are divided at the **document level**. Every Q&A pair in the train split originates from PDFs that do not appear in validation or test, and vice versa. This design guarantees that the model cannot memorize test-set answers during training by having seen their source documents. The `Fuga de datos entre splits` (cross-split contamination) metric is **0** across all 5,727 pairs.
+</Note>
+
+## How to Run Ragas Evaluation Yourself
+
+To reproduce or extend the formal Ragas evaluation on a raw split artifact:
+
+```bash
+python scripts/evaluate_qa_with_ragas.py \
+  --input datasets/obstetrics/qa/final/train/raw.jsonl \
+  --sample-size 300 \
+  --seed 42 \
+  --custom-judge-model gpt-5.4-mini \
+  --output datasets/obstetrics/qa/final/ragas_results/final_train_sample300_eval.json
+```
+
+Adjust `--input` to point at `validation/raw.jsonl` or `test/raw.jsonl` for the other splits. Use `--sample-size` to control evaluation cost and `--seed` to ensure reproducible sampling. The script computes Ragas `faithfulness` and `answer_relevancy` — `context_precision` is intentionally excluded because each pair has a single known source chunk and no retrieval ranking is being evaluated.
+
+## See Also
+
+<CardGroup cols={2}>
+  <Card
+    title="Dataset Overview"
+    icon="table"
+    href="/dataset/overview"
+  >
+    Full corpus statistics, split counts, topic coverage, and Hugging Face links.
+  </Card>
+  <Card
+    title="Pipeline: Evaluation"
+    icon="flask"
+    href="/pipeline/evaluation"
+  >
+    End-to-end evaluation workflow for base models and QLoRA fine-tuned adapters.
+  </Card>
+</CardGroup>

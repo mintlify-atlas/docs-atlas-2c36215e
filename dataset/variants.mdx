@@ -1,0 +1,191 @@
+---
+title: "Dataset Variants: SFT Grounded, Closed Book, and Flat JSONL"
+sidebarTitle: "Variants"
+description: "Compare MaternaQA-es variants — sft_grounded, sft_closed_book, and qa_flat_jsonl — and choose the right format for fine-tuning or evaluation."
+---
+
+MaternaQA-es is published in three distinct variants, each optimized for a different use case. `sft_grounded` is designed for evidence-grounded fine-tuning and RAG evaluation, where the model receives source context alongside every question. `sft_closed_book` targets domain internalization experiments without explicit context. `qa_flat_jsonl` exposes every metadata field in a flat record structure suited to auditing, analysis, and scientific reporting.
+
+## Variants at a Glance
+
+| Variant | Input Format | Recommended Use |
+|---------|-------------|-----------------|
+| `sft_closed_book` | Question → Answer | Domain internalization without explicit context |
+| `sft_grounded` | Context + Question → Answer | Evidence-grounded fine-tuning and RAG evaluation |
+| `qa_flat_jsonl` | Flat record with all metadata | Auditing, analysis, scientific reporting |
+
+---
+
+## sft_grounded
+
+In the `sft_grounded` variant, the user turn begins with the prefix `Contexto fuente:` followed by the clinical source chunk, then the question. The model is expected to answer using the provided evidence. This is the recommended starting point for most fine-tuning and evaluation experiments.
+
+```json
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "Eres un asistente especializado en obstetricia y ginecología. Responde en español con precisión clínica, claridad y vocabulario médico apropiado. Prioriza respuestas fieles a la evidencia disponible, bien estructuradas y útiles para resolver la pregunta planteada. Si la evidencia disponible no permite una afirmación concluyente, indícalo con claridad en lugar de inventar detalles."
+    },
+    {
+      "role": "user",
+      "content": "Contexto fuente:\n\"A pesar de los efectos teratogénicos observados en los estudios con animales, no se ha evidenciado un incremento del riesgo de abortos espontáneos ni de malformaciones congénitas en los neonatos de las mujeres tratadas con mebendazol durante el primer trimestre del embarazo\"\n\nPregunta:\n¿Qué se ha observado sobre el riesgo de abortos espontáneos y malformaciones congénitas en neonatos cuando se usa mebendazol durante el primer trimestre del embarazo?"
+    },
+    {
+      "role": "assistant",
+      "content": "A pesar de que en estudios con animales se han descrito efectos teratogénicos, en mujeres tratadas con mebendazol durante el primer trimestre no se ha evidenciado un incremento del riesgo de abortos espontáneos ni de malformaciones congénitas en los neonatos."
+    }
+  ],
+  "metadata": {
+    "source": "obstetrics_spanish_synthetic",
+    "source_pdf": "S0213005X09004418.pdf",
+    "chunk_id": "s0213005x09004418_00006",
+    "qa_id": "s0213005x09004418_00006_qa_001",
+    "pages": [6],
+    "topics": ["newborn_care", "prenatal_care"],
+    "split": "train",
+    "clinical_score": 9,
+    "token_estimate": 279,
+    "tipo": "factual",
+    "dificultad": "intermedio"
+  }
+}
+```
+
+**File paths:**
+
+```text
+datasets/obstetrics/qa/publication/sft_grounded/train.jsonl
+datasets/obstetrics/qa/publication/sft_grounded/validation.jsonl
+datasets/obstetrics/qa/publication/sft_grounded/test.jsonl
+```
+
+<Tip>
+  Start here. `sft_grounded` is recommended for most experiments because it trains the model to reason over supplied evidence, which directly aligns with RAG-style inference settings.
+</Tip>
+
+---
+
+## sft_closed_book
+
+In the `sft_closed_book` variant, the user turn contains only the clinical question — no source context is provided. This format is used to measure how much domain knowledge a model internalizes in its adapter weights during fine-tuning, without any retrieval aid at inference time.
+
+```json
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "Eres un asistente especializado en obstetricia y ginecología. Responde en español con precisión clínica, claridad y vocabulario médico apropiado. Prioriza respuestas fieles a la evidencia disponible, bien estructuradas y útiles para resolver la pregunta planteada. Si la evidencia disponible no permite una afirmación concluyente, indícalo con claridad en lugar de inventar detalles."
+    },
+    {
+      "role": "user",
+      "content": "¿Qué se ha observado sobre el riesgo de abortos espontáneos y malformaciones congénitas en neonatos cuando se usa mebendazol durante el primer trimestre del embarazo?"
+    },
+    {
+      "role": "assistant",
+      "content": "A pesar de que en estudios con animales se han descrito efectos teratogénicos, en mujeres tratadas con mebendazol durante el primer trimestre no se ha evidenciado un incremento del riesgo de abortos espontáneos ni de malformaciones congénitas en los neonatos."
+    }
+  ],
+  "metadata": {
+    "source": "obstetrics_spanish_synthetic",
+    "source_pdf": "S0213005X09004418.pdf",
+    "chunk_id": "s0213005x09004418_00006",
+    "qa_id": "s0213005x09004418_00006_qa_001",
+    "pages": [6],
+    "topics": ["newborn_care", "prenatal_care"],
+    "split": "train",
+    "clinical_score": 9,
+    "token_estimate": 279,
+    "tipo": "factual",
+    "dificultad": "intermedio"
+  }
+}
+```
+
+**File paths:**
+
+```text
+datasets/obstetrics/qa/publication/sft_closed_book/train.jsonl
+datasets/obstetrics/qa/publication/sft_closed_book/validation.jsonl
+datasets/obstetrics/qa/publication/sft_closed_book/test.jsonl
+```
+
+Use this variant when you want to quantify how much clinical knowledge is encoded directly in the adapter weights, independent of any retrieval mechanism.
+
+---
+
+## qa_flat_jsonl
+
+The `qa_flat_jsonl` variant exposes every field as a flat top-level key rather than nesting them inside a `messages` array. It includes question, answer, source context, and all provenance and metadata fields, making it ideal for scientific reporting, Ragas evaluation pipelines, and exploratory data analysis.
+
+**Key fields:** `pregunta`, `respuesta`, `contexto_fuente`, `chunk_id`, `source_pdf`, `pages`, `tipo`, `dificultad`, `topics`, `token_estimate`, `clinical_score`
+
+```json
+{
+  "qa_id": "s0213005x09004418_00006_qa_001",
+  "chunk_id": "s0213005x09004418_00006",
+  "source_pdf": "S0213005X09004418.pdf",
+  "section": "Sin seccion",
+  "section_type": "unknown",
+  "content_role": "evidence",
+  "topics": ["newborn_care", "prenatal_care"],
+  "split": "train",
+  "pages": [6],
+  "clinical_score": 9,
+  "token_estimate": 279,
+  "pregunta": "¿Qué se ha observado sobre el riesgo de abortos espontáneos y malformaciones congénitas en neonatos cuando se usa mebendazol durante el primer trimestre del embarazo?",
+  "respuesta": "A pesar de que en estudios con animales se han descrito efectos teratogénicos, en mujeres tratadas con mebendazol durante el primer trimestre no se ha evidenciado un incremento del riesgo de abortos espontáneos ni de malformaciones congénitas en los neonatos.",
+  "tipo": "factual",
+  "dificultad": "intermedio",
+  "contexto_fuente": "\"A pesar de los efectos teratogénicos observados en los estudios con animales, no se ha evidenciado un incremento del riesgo de abortos espontáneos ni de malformaciones congénitas en los neonatos de las mujeres tratadas con mebendazol durante el primer trimestre del embarazo\""
+}
+```
+
+**File paths:**
+
+```text
+datasets/obstetrics/qa/publication/qa_flat_jsonl/train.jsonl
+datasets/obstetrics/qa/publication/qa_flat_jsonl/validation.jsonl
+datasets/obstetrics/qa/publication/qa_flat_jsonl/test.jsonl
+datasets/obstetrics/qa/publication/qa_flat_jsonl/all.jsonl
+```
+
+The `all.jsonl` file is a single consolidated file containing all three splits — convenient for exploration or simple publication pipelines that do not require pre-split data.
+
+---
+
+## Loading Any Variant
+
+Use the `load_dataset` function from the Hugging Face `datasets` library to load any variant directly from local JSONL files:
+
+```python
+from datasets import load_dataset
+
+dataset = load_dataset(
+    "json",
+    data_files={
+        "train": "datasets/obstetrics/qa/publication/sft_grounded/train.jsonl",
+        "validation": "datasets/obstetrics/qa/publication/sft_grounded/validation.jsonl",
+        "test": "datasets/obstetrics/qa/publication/sft_grounded/test.jsonl",
+    },
+)
+
+train = dataset["train"]
+validation = dataset["validation"]
+test = dataset["test"]
+```
+
+Swap `sft_grounded` for `sft_closed_book` or `qa_flat_jsonl` in the paths to load a different variant. The `test` split should be kept held-out and not used for hyperparameter selection.
+
+---
+
+## Recommended Experiment Matrix
+
+The following matrix maps model families to dataset variants and training paths for systematic comparison:
+
+| Model Family | Dataset Variant | Training Path | Purpose |
+|---|---|---|---|
+| Gemma 4 instruct | `sft_grounded` | TRL + PEFT + bitsandbytes (QLoRA) | Measure evidence-guided QA performance. |
+| Gemma 4 instruct | `sft_closed_book` | TRL + PEFT + bitsandbytes (QLoRA) | Measure domain adaptation without context. |
+| MedGemma 1.5 4B IT | `sft_grounded` | TRL + PEFT + bitsandbytes (QLoRA) | Measure evidence-guided QA on a medical instruct model. |
+| MedGemma 1.5 4B IT | `sft_closed_book` | TRL + PEFT + bitsandbytes (QLoRA) | Measure domain adaptation on a medical instruct model. |

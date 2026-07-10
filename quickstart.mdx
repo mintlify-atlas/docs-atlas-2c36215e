@@ -1,47 +1,140 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with MaternaQA-es"
+sidebarTitle: "Quickstart"
+description: "Install dependencies, load a dataset split, and validate end-to-end QLoRA fine-tuning with a smoke test — up and running in under 10 minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+This guide walks you through everything you need to start working with MaternaQA-es from scratch. You will clone the repository, set up a Python virtual environment, install all required dependencies, load a dataset split in Python, and validate that the full fine-tuning pipeline is functional by running a lightweight smoke test — all in under 10 minutes.
 
 ## Prerequisites
 
-Before you begin, you must have:
+<Note>
+  Before you begin, ensure your environment meets the following requirements:
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+  - **Python 3.11+** — the project is developed and tested against Python 3.11.
+  - **NVIDIA GPU with ≥ 16 GB VRAM** — required for QLoRA fine-tuning. Dataset loading and exploration work on CPU without a GPU.
+  - **`OPENAI_API_KEY`** — only needed if you intend to regenerate Q&A pairs from corpus chunks using `generate_synthetic_qa.py`. Dataset loading and fine-tuning do not require it.
+  - **`HF_TOKEN`** — a Hugging Face account with an active token, and accepted gated model terms for both **Gemma 4** and **MedGemma** on huggingface.co. Required to download model weights for fine-tuning.
+</Note>
 
-## Get started
+## Installation
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Clone the repository">
+    Clone the MaternaQA-es repository from GitHub and enter the project directory:
 
     ```bash
-    npm install your-package
+    git clone https://github.com/NicolasHoyosDevss/Fine-Tunning-Benchmark.git MaternaQA-es
+    cd MaternaQA-es
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+  <Step title="Create and activate a virtual environment">
+    Create an isolated Python environment to avoid dependency conflicts with other projects:
 
     ```bash
-    your-cli init
+    python -m venv .venv && source .venv/bin/activate
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Install dependencies">
+    Install all required packages — this covers PDF extraction, Q&A generation, Ragas evaluation, and the full fine-tuning stack (TRL, PEFT, QLoRA):
 
     ```bash
-    your-cli start
+    pip install -r requirements.txt
     ```
+
+    Key packages installed include `datasets`, `transformers`, `trl`, `peft`, `bitsandbytes`, `ragas`, `openai`, and `pymupdf`.
+  </Step>
+
+  <Step title="Set up API keys (optional)">
+    Set your OpenAI API key if you plan to regenerate Q&A pairs, and authenticate with Hugging Face to download gated model weights:
+
+    ```bash
+    export OPENAI_API_KEY=sk-...
+    huggingface-cli login
+    ```
+
+    Keep secrets in a local `.env` file and never commit them to version control.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Load a dataset variant
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+The published dataset ships in three variants. Load the recommended `sft_grounded` variant — which pairs a clinical context chunk with each question — using the `datasets` library:
+
+```python
+from datasets import load_dataset
+
+dataset = load_dataset(
+    "json",
+    data_files={
+        "train": "datasets/obstetrics/qa/publication/sft_grounded/train.jsonl",
+        "validation": "datasets/obstetrics/qa/publication/sft_grounded/validation.jsonl",
+        "test": "datasets/obstetrics/qa/publication/sft_grounded/test.jsonl",
+    },
+)
+
+train = dataset["train"]
+validation = dataset["validation"]
+test = dataset["test"]
+```
+
+<Tip>
+  **`sft_grounded` is recommended for most use cases.** Each record includes a clinical context chunk alongside the question and answer, encouraging the model to reason from provided evidence — the right setup for RAG evaluation and grounded clinical assistants.
+
+  Use `sft_closed_book` when you want to measure how much domain knowledge a model internalizes without access to a context window. Swap the path above to `sft_closed_book/` in all three splits.
 </Tip>
+
+## Smoke test fine-tuning
+
+Before launching a full multi-hour training run, validate your setup end-to-end with a smoke test. The smoke test runs for only 10 steps with 64 training examples and 32 evaluation examples, completes in approximately 3 minutes, and confirms that model loading, QLoRA adapter initialization, training loop, and checkpoint saving all work correctly on your hardware.
+
+<CodeGroup>
+
+```bash Gemma 4 E2B
+python scripts/train_qlora_trl.py \
+  --model-name google/gemma-4-E2B-it \
+  --dataset-variant sft_grounded \
+  --output-dir outputs/smoke-gemma4 \
+  --max-steps 10 \
+  --train-limit 64 \
+  --eval-limit 32
+```
+
+```bash MedGemma 1.5 4B
+python scripts/train_qlora_trl.py \
+  --model-name google/medgemma-1.5-4b-it \
+  --dataset-variant sft_grounded \
+  --output-dir outputs/smoke-medgemma \
+  --max-steps 10 \
+  --train-limit 64 \
+  --eval-limit 32
+```
+
+</CodeGroup>
+
+<Note>
+  The smoke test trains for **10 steps** with **64 train examples** and **32 eval examples**. It typically completes in **~3 minutes** on a 16 GB GPU and validates the full load → train → save flow without committing to a full dataset run.
+
+  The training script loads the model in 4-bit quantization, trains LoRA adapters (r=16) over all linear layers, and saves only the adapter weights to `output-dir/` — the base model is never modified.
+
+  If MedGemma fails with an architecture error, add `--model-class causal-lm` to the command. Run `python scripts/train_qlora_trl.py --help` to see all available hyperparameter flags.
+</Note>
+
+## What's next
+
+<CardGroup cols={2}>
+  <Card title="Dataset Variants" icon="layer-group" href="/dataset/variants">
+    Compare `sft_grounded`, `sft_closed_book`, and `qa_flat_jsonl` in detail — schema, fields, and recommended use cases for each format.
+  </Card>
+  <Card title="Full Fine-tuning Guide" icon="dumbbell" href="/fine-tuning/training">
+    Run a complete QLoRA training job over all 5,093 training pairs with Gemma 4 or MedGemma, including hyperparameter guidance.
+  </Card>
+  <Card title="Pipeline Overview" icon="diagram-project" href="/pipeline/overview">
+    Understand the full 8-step construction pipeline, from PDF curation through synthetic Q&A generation and Ragas evaluation.
+  </Card>
+  <Card title="Dataset Quality" icon="shield-check" href="/dataset/quality">
+    Review Ragas faithfulness and relevance scores, grounding overlap metrics, and audit procedures used during dataset construction.
+  </Card>
+</CardGroup>

@@ -1,0 +1,85 @@
+---
+title: "inference_base.py — Baseline Model Inference Script"
+sidebarTitle: "inference_base.py"
+description: "Generate baseline predictions from unmodified Gemma 4 or MedGemma models on the MaternaQA-es test set without any fine-tuned adapter."
+---
+
+`inference_base.py` runs the MaternaQA-es test set through an unmodified base model — no adapter is loaded. The generated predictions form the baseline used to measure the improvement gained from QLoRA fine-tuning. The output file is a JSONL of per-sample predictions that can be fed directly into `evaluate_model_predictions.py` for scoring.
+
+## Usage
+
+```bash
+python scripts/inference_base.py \
+  --model-name google/gemma-4-E2B-it \
+  --output-prefix outputs/gemma4-base/test
+```
+
+```bash
+python scripts/inference_base.py \
+  --model-name google/medgemma-1.5-4b-it \
+  --output-prefix outputs/medgemma-base/test \
+  --limit 10
+```
+
+The output file is written to `<output-prefix>_predictions.jsonl`. For example, `--output-prefix outputs/gemma4-base/test` produces `outputs/gemma4-base/test_predictions.jsonl`.
+
+## CLI Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--model-name` | `str` | *(required)* | Hugging Face model ID or local path of the base model. |
+| `--model-class` | `str` | `auto` | Model loading class. `auto` uses `AutoModelForImageTextToText` for Gemma 4/MedGemma and `AutoModelForCausalLM` for others. Choices: `auto`, `causal-lm`, `image-text-to-text`. |
+| `--dataset-root` | `Path` | `datasets/obstetrics/qa/publication` | Root folder containing the publication variant subdirectories. |
+| `--dataset-variant` | `str` | `sft_grounded` | SFT variant to read the test split from. Choices: `sft_closed_book`, `sft_grounded`. |
+| `--output-prefix` | `Path` | *(required)* | Path prefix for the output file. The script appends `_predictions.jsonl` to produce the final filename. |
+| `--max-new-tokens` | `int` | `512` | Maximum number of new tokens the model may generate per prediction. |
+| `--temperature` | `float` | `0.7` | Sampling temperature. Only applied when `--do-sample` is set. |
+| `--top-p` | `float` | `0.9` | Nucleus sampling probability threshold. Only applied when `--do-sample` is set. |
+| `--do-sample` | flag | `False` | Use stochastic sampling. By default the script uses greedy decoding for reproducible evaluation. |
+| `--limit` | `int` | `None` | Maximum number of test examples to process. Useful for smoke tests. |
+| `--trust-remote-code` | flag | `False` | Pass `trust_remote_code=True` to model and tokenizer loaders. |
+| `--attn-implementation` | `str` | `None` | Optional attention backend override: `eager`, `sdpa`, `flash_attention_2`, etc. |
+| `--load-in-4bit` | `bool` | `True` | Load the base model in 4-bit NF4 quantization to keep inference memory-comparable to training and reduce VRAM usage. |
+| `--resume` | `bool` | `True` | Resume from an existing `<output-prefix>_predictions.jsonl`, skipping already-processed `qa_id`s. Use `--no-resume` to overwrite the file from scratch. |
+
+## What It Does
+
+1. **Loads the base model** in 4-bit NF4 quantization (matching the training setup) using `BitsAndBytesConfig` with `bnb_4bit_quant_type="nf4"` and double quantization enabled. The model is loaded with `device_map="auto"` and placed in `eval()` mode.
+2. **Reads the test split** from `<dataset-root>/<dataset-variant>/test.jsonl`. The `--dataset-variant` flag controls whether the model receives source context (`sft_grounded`) or only the question (`sft_closed_book`).
+3. **Builds a prompt** for each example by extracting all messages up to (but not including) the last assistant turn, then applying the tokenizer's chat template with `add_generation_prompt=True`.
+4. **Generates a prediction** using greedy decoding by default (set `--do-sample` for stochastic generation). The new tokens are decoded and stripped of special tokens.
+5. **Writes results incrementally** to the output JSONL file, flushing after every prediction so the run can be safely interrupted and resumed.
+
+## Output File
+
+Each line in `<output-prefix>_predictions.jsonl` is a JSON object with the following fields:
+
+| Field | Description |
+|-------|-------------|
+| `id` | `qa_id` from dataset metadata, or sequential index as fallback |
+| `model_role` | Always `"base"` for predictions from this script |
+| `model_name` | The value of `--model-name` |
+| `adapter_dir` | Always `null` (no adapter loaded) |
+| `dataset_variant` | The value of `--dataset-variant` |
+| `question` | Extracted question text |
+| `generated_answer` | The model's generated prediction |
+| `reference_answer` | The ground-truth answer from the test split |
+| `source_context` | Source context from `metadata.contexto_fuente` |
+| `prompt_text` | The full rendered prompt string sent to the model |
+| `metadata` | Full metadata dict from the original JSONL record |
+
+<Note>
+The repository includes pre-computed baseline predictions ready for evaluation. You can use them directly without re-running inference:
+- `outputs/gemma4-base/test_predictions.jsonl`
+- `outputs/medgemma-base/test_predictions.jsonl`
+</Note>
+
+## Next Step
+
+Pipe the predictions file into `evaluate_model_predictions.py` to compute faithfulness, answer relevancy, answer correctness, and semantic similarity scores:
+
+```bash
+python scripts/evaluate_model_predictions.py \
+  --input outputs/gemma4-base/test_predictions.jsonl \
+  --output outputs/gemma4-base/test_eval.json
+```

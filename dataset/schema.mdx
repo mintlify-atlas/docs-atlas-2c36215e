@@ -1,0 +1,246 @@
+---
+title: "MaternaQA-es JSONL Schema and Field Reference"
+sidebarTitle: "Schema"
+description: "Complete field reference for MaternaQA-es JSONL records across sft_grounded, sft_closed_book, and qa_flat_jsonl dataset variants."
+---
+
+MaternaQA-es is distributed as three JSONL variants that share the same underlying content but expose it in different structures. The two SFT variants — `sft_grounded` and `sft_closed_book` — use the standard chat `messages` array format, making them directly compatible with training frameworks that accept conversational data. The `qa_flat_jsonl` variant stores every field as a top-level key, giving full access to provenance and quality metadata without unpacking nested objects. All three variants omit the operational judge quality metric fields (`faithfulness`, `answer_relevancy`, `roundtrip_consistency`, `quality_verdict`, `quality_reason`) that appear in the raw generation artifacts.
+
+---
+
+## SFT Variants Schema
+
+Both `sft_grounded` and `sft_closed_book` records share this top-level structure.
+
+### Top-Level Fields
+
+<ParamField body="messages" type="array" required>
+  Ordered list of chat turn objects forming the conversation. Each record contains exactly three turns: `system`, `user`, and `assistant`. In `sft_grounded`, the `user` turn includes the source context followed by the question. In `sft_closed_book`, the `user` turn contains only the question.
+</ParamField>
+
+<ParamField body="metadata" type="object" required>
+  Per-record audit and provenance metadata. Fields inside this object are consistent across both SFT variants.
+</ParamField>
+
+### Messages Turn Fields
+
+<ParamField body="messages[].role" type="string" required>
+  Role of the speaker in the conversation. One of `system`, `user`, or `assistant`.
+</ParamField>
+
+<ParamField body="messages[].content" type="string" required>
+  Text content of the turn. For the `system` role, this is a fixed Spanish-language clinical instruction prompt. For `user` in `sft_grounded`, this is `Contexto fuente:` followed by the chunk text and then the question. For `user` in `sft_closed_book`, this is only the question. For `assistant`, this is the clinical answer.
+</ParamField>
+
+### Metadata Fields
+
+<ParamField body="metadata.chunk_id" type="string">
+  Stable identifier for the source corpus chunk. Format: `<pdf_slug>_<chunk_index>` (e.g., `s0213005x09004418_00006`). Use this to join Q&A records back to the LM corpus dataset.
+</ParamField>
+
+<ParamField body="metadata.source_pdf" type="string">
+  Filename of the source clinical PDF from which the chunk was extracted (e.g., `S0213005X09004418.pdf`).
+</ParamField>
+
+<ParamField body="metadata.qa_id" type="string">
+  Unique identifier for this specific Q&A pair. Format: `<chunk_id>_qa_<index>` (e.g., `s0213005x09004418_00006_qa_001`).
+</ParamField>
+
+<ParamField body="metadata.pages" type="array">
+  List of integer page numbers within the source PDF that the chunk spans.
+</ParamField>
+
+<ParamField body="metadata.tipo" type="string">
+  Question type. One of `factual`, `definicion`, `comparacion`, `razonamiento`, `aplicacion`, or `hipotetico`.
+</ParamField>
+
+<ParamField body="metadata.dificultad" type="string">
+  Difficulty level assigned during generation. One of `basico`, `intermedio`, or `avanzado`.
+</ParamField>
+
+<ParamField body="metadata.topics" type="array">
+  List of clinical topic tags annotated for the source chunk (e.g., `["newborn_care", "prenatal_care"]`).
+</ParamField>
+
+<ParamField body="metadata.token_estimate" type="integer">
+  Estimated token count of the source context chunk.
+</ParamField>
+
+<ParamField body="metadata.clinical_score" type="integer">
+  Quality score assigned to the chunk during corpus construction. Higher values indicate more clinically dense and useful content.
+</ParamField>
+
+<ParamField body="metadata.split" type="string">
+  Dataset split this record belongs to. One of `train`, `validation`, or `test`.
+</ParamField>
+
+---
+
+### Complete sft_grounded Example
+
+```json
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "Eres un asistente especializado en obstetricia y ginecología. Responde en español con precisión clínica, claridad y vocabulario médico apropiado. Prioriza respuestas fieles a la evidencia disponible, bien estructuradas y útiles para resolver la pregunta planteada. Si la evidencia disponible no permite una afirmación concluyente, indícalo con claridad en lugar de inventar detalles."
+    },
+    {
+      "role": "user",
+      "content": "Contexto fuente:\n\"A pesar de los efectos teratogénicos observados en los estudios con animales, no se ha evidenciado un incremento del riesgo de abortos espontáneos ni de malformaciones congénitas en los neonatos de las mujeres tratadas con mebendazol durante el primer trimestre del embarazo\"\n\nPregunta:\n¿Qué se ha observado sobre el riesgo de abortos espontáneos y malformaciones congénitas en neonatos cuando se usa mebendazol durante el primer trimestre del embarazo?"
+    },
+    {
+      "role": "assistant",
+      "content": "A pesar de que en estudios con animales se han descrito efectos teratogénicos, en mujeres tratadas con mebendazol durante el primer trimestre no se ha evidenciado un incremento del riesgo de abortos espontáneos ni de malformaciones congénitas en los neonatos."
+    }
+  ],
+  "metadata": {
+    "source": "obstetrics_spanish_synthetic",
+    "source_pdf": "S0213005X09004418.pdf",
+    "chunk_id": "s0213005x09004418_00006",
+    "qa_id": "s0213005x09004418_00006_qa_001",
+    "pages": [6],
+    "section": "Sin seccion",
+    "section_type": "unknown",
+    "content_role": "evidence",
+    "topics": ["newborn_care", "prenatal_care"],
+    "split": "train",
+    "clinical_score": 9,
+    "token_estimate": 279,
+    "tipo": "factual",
+    "dificultad": "intermedio",
+    "contexto_fuente": "\"A pesar de los efectos teratogénicos observados en los estudios con animales, no se ha evidenciado un incremento del riesgo de abortos espontáneos ni de malformaciones congénitas en los neonatos de las mujeres tratadas con mebendazol durante el primer trimestre del embarazo\""
+  }
+}
+```
+
+---
+
+### Complete sft_closed_book Example
+
+```json
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "Eres un asistente especializado en obstetricia y ginecología. Responde en español con precisión clínica, claridad y vocabulario médico apropiado. Prioriza respuestas fieles a la evidencia disponible, bien estructuradas y útiles para resolver la pregunta planteada. Si la evidencia disponible no permite una afirmación concluyente, indícalo con claridad en lugar de inventar detalles."
+    },
+    {
+      "role": "user",
+      "content": "¿Qué se ha observado sobre el riesgo de abortos espontáneos y malformaciones congénitas en neonatos cuando se usa mebendazol durante el primer trimestre del embarazo?"
+    },
+    {
+      "role": "assistant",
+      "content": "A pesar de que en estudios con animales se han descrito efectos teratogénicos, en mujeres tratadas con mebendazol durante el primer trimestre no se ha evidenciado un incremento del riesgo de abortos espontáneos ni de malformaciones congénitas en los neonatos."
+    }
+  ],
+  "metadata": {
+    "source": "obstetrics_spanish_synthetic",
+    "source_pdf": "S0213005X09004418.pdf",
+    "chunk_id": "s0213005x09004418_00006",
+    "qa_id": "s0213005x09004418_00006_qa_001",
+    "pages": [6],
+    "section": "Sin seccion",
+    "section_type": "unknown",
+    "content_role": "evidence",
+    "topics": ["newborn_care", "prenatal_care"],
+    "split": "train",
+    "clinical_score": 9,
+    "token_estimate": 279,
+    "tipo": "factual",
+    "dificultad": "intermedio",
+    "contexto_fuente": "\"A pesar de los efectos teratogénicos observados en los estudios con animales, no se ha evidenciado un incremento del riesgo de abortos espontáneos ni de malformaciones congénitas en los neonatos de las mujeres tratadas con mebendazol durante el primer trimestre del embarazo\""
+  }
+}
+```
+
+---
+
+## qa_flat_jsonl Schema
+
+The flat variant exposes all fields at the top level. The question and answer fields use Spanish-language names consistent with the generation pipeline.
+
+<ParamField body="pregunta" type="string" required>
+  The clinical question in Spanish.
+</ParamField>
+
+<ParamField body="respuesta" type="string" required>
+  The clinical answer in Spanish, grounded in the source chunk.
+</ParamField>
+
+<ParamField body="contexto_fuente" type="string">
+  The source chunk text used during grounded generation. This is the same content that appears in the `user` turn of `sft_grounded` records.
+</ParamField>
+
+<ParamField body="chunk_id" type="string">
+  Stable chunk identifier in the format `<pdf_slug>_<chunk_index>`. Links back to the LM corpus dataset.
+</ParamField>
+
+<ParamField body="qa_id" type="string">
+  Unique identifier for the Q&A pair. Format: `<chunk_id>_qa_<index>`.
+</ParamField>
+
+<ParamField body="source_pdf" type="string">
+  Filename of the source clinical PDF (e.g., `S0213005X09004418.pdf`).
+</ParamField>
+
+<ParamField body="pages" type="array">
+  Integer page numbers within the source PDF that the chunk covers.
+</ParamField>
+
+<ParamField body="tipo" type="string">
+  Question type. One of `factual`, `definicion`, `comparacion`, `razonamiento`, `aplicacion`, or `hipotetico`.
+</ParamField>
+
+<ParamField body="dificultad" type="string">
+  Difficulty level. One of `basico`, `intermedio`, or `avanzado`.
+</ParamField>
+
+<ParamField body="topics" type="array">
+  List of clinical topic tags (e.g., `["prenatal_care", "infection"]`).
+</ParamField>
+
+<ParamField body="token_estimate" type="integer">
+  Estimated token count of the source context chunk.
+</ParamField>
+
+<ParamField body="clinical_score" type="integer">
+  Quality score for the source chunk from corpus construction. Higher values indicate more clinically relevant content.
+</ParamField>
+
+<ParamField body="split" type="string">
+  Dataset split. One of `train`, `validation`, or `test`.
+</ParamField>
+
+---
+
+### Complete qa_flat_jsonl Example
+
+```json
+{
+  "qa_id": "s0213005x09004418_00006_qa_001",
+  "chunk_id": "s0213005x09004418_00006",
+  "source_pdf": "S0213005X09004418.pdf",
+  "section": "Sin seccion",
+  "section_type": "unknown",
+  "content_role": "evidence",
+  "topics": ["newborn_care", "prenatal_care"],
+  "split": "train",
+  "pages": [6],
+  "clinical_score": 9,
+  "token_estimate": 279,
+  "pregunta": "¿Qué se ha observado sobre el riesgo de abortos espontáneos y malformaciones congénitas en neonatos cuando se usa mebendazol durante el primer trimestre del embarazo?",
+  "respuesta": "A pesar de que en estudios con animales se han descrito efectos teratogénicos, en mujeres tratadas con mebendazol durante el primer trimestre no se ha evidenciado un incremento del riesgo de abortos espontáneos ni de malformaciones congénitas en los neonatos.",
+  "tipo": "factual",
+  "dificultad": "intermedio",
+  "contexto_fuente": "\"A pesar de los efectos teratogénicos observados en los estudios con animales, no se ha evidenciado un incremento del riesgo de abortos espontáneos ni de malformaciones congénitas en los neonatos de las mujeres tratadas con mebendazol durante el primer trimestre del embarazo\""
+}
+```
+
+---
+
+## Quality Metric Fields
+
+<Note>
+  The fields `faithfulness`, `answer_relevancy`, `roundtrip_consistency`, `quality_verdict`, and `quality_reason` are **omitted from all publication files**. They appear as `null` in the raw generation artifacts at `datasets/obstetrics/qa/final/<split>/raw.jsonl` and are produced by the operational judge used during data construction. They are not part of the formal Ragas evaluation results. See the [Quality](/dataset/quality) page for the formal evaluation methodology and scores.
+</Note>

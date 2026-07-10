@@ -1,0 +1,188 @@
+---
+title: "generate_synthetic_qa.py — Synthetic Q&A Generation Script"
+sidebarTitle: "generate_synthetic_qa.py"
+description: "Generate Spanish clinical Q&A pairs from LM corpus chunks using OpenAI Structured Outputs. Supports async generation, checkpoint resume, and six question types."
+---
+
+`generate_synthetic_qa.py` takes LM corpus chunks and generates Spanish clinical Q&A pairs using OpenAI Structured Outputs. It runs asynchronously with a configurable semaphore, writes incremental checkpoints for safe resume, and produces both a raw auditable JSONL and an SFT-ready messages-format JSONL.
+
+## Prerequisites
+
+<Note>
+  Set your OpenAI API key before running the script:
+
+  ```bash
+  export OPENAI_API_KEY="sk-..."
+  ```
+
+  Requires `openai>=1.68.0` and `pydantic>=2.7.0`.
+</Note>
+
+## Basic usage
+
+The following command generates Q&A pairs for the train split using the default budget model:
+
+```bash
+python scripts/generate_synthetic_qa.py \
+  --input datasets/obstetrics/lm/train_lm.jsonl \
+  --raw-output datasets/obstetrics/qa/final/train/raw.jsonl \
+  --sft-output datasets/obstetrics/qa/final/train/sft.jsonl \
+  --progress-file datasets/obstetrics/qa/final/train/progress.json \
+  --report-output datasets/obstetrics/qa/final/train/generation_report.json \
+  --model gpt-5.4-mini \
+  --min-pairs 2 --max-pairs 5
+```
+
+## Dry run
+
+Preview statistics and cost estimates without making any API calls:
+
+```bash
+python scripts/generate_synthetic_qa.py --dry-run
+```
+
+## Cost estimates
+
+Estimates are based on 856 chunks as of May 2026:
+
+| Model | Estimated cost |
+|---|---|
+| `gpt-5.4-mini` | ≈ $1.10 USD |
+| `gpt-5.4` | ≈ $4.50 USD |
+| `gpt-5.5` | ≈ $8.00 USD |
+
+`gpt-5.4-mini` is the recommended budget option. `gpt-5.4` balances quality and cost. `gpt-5.5` targets maximum clinical quality.
+
+<Note>
+  `gpt-4o` and `gpt-4o-mini` were deprecated in February 2026 and are no longer supported.
+</Note>
+
+## CLI flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--input` | `Path` | `datasets/obstetrics/lm/train_lm.jsonl` | JSONL of cleaned chunks to process. |
+| `--raw-output` | `Path` | `datasets/obstetrics/qa/synthetic_qa_raw.jsonl` | Output JSONL with raw pairs and full audit metadata. |
+| `--sft-output` | `Path` | `datasets/obstetrics/qa/synthetic_qa_sft.jsonl` | Output JSONL in messages format, ready for SFT/QLoRA. |
+| `--progress-file` | `Path` | `datasets/obstetrics/qa/.qa_generation_progress.json` | Checkpoint file for safe resume after interruption. |
+| `--report-output` | `Path` | `datasets/obstetrics/qa/qa_generation_report.json` | JSON report with generation and grounding metrics per split. |
+| `--model` | `str` | `gpt-5.4-mini` | OpenAI model to use. Choices: `gpt-5.2`, `gpt-5.4-mini`, `gpt-5.4`, `gpt-5.5`. |
+| `--min-pairs` | `int` | `2` | Minimum number of Q&A pairs to request per chunk. |
+| `--max-pairs` | `int` | `5` | Maximum number of Q&A pairs to request per chunk. |
+| `--concurrency` | `int` | `15` | Number of simultaneous API requests (semaphore size). |
+| `--min-clinical-score` | `int` | `0` | Skip chunks with a `clinical_score` below this value. |
+| `--allowed-languages` | `str` | `es` | Comma-separated list of allowed chunk languages. |
+| `--allowed-content-roles` | `str` | `evidence,recommendation,procedure,diagnostic,treatment` | Comma-separated list of permitted content roles (Phase 7 filter). |
+| `--no-content-role-filter` | flag | `False` | Disable the content role filter for backward compatibility. |
+| `--min-topic-coverage` | `float` | `0.30` | Minimum topic coverage fraction to report after content-role filtering. |
+| `--api-key` | `str` | `None` | OpenAI API key. Falls back to `OPENAI_API_KEY` environment variable. |
+| `--dry-run` | flag | `False` | Print cost estimates without calling the API. |
+| `--limit` | `int` | `None` | Process only the first N chunks after filtering. Useful for small tests. |
+| `--seed` | `int` | `42` | Random seed for reproducibility. |
+| `--enable-quality-eval` | flag | `False` | Enable per-pair quality evaluation (faithfulness, relevancy, roundtrip). |
+| `--quality-verifier-model` | `str` | `gpt-5.4` | Model used as quality judge when `--enable-quality-eval` is active. |
+| `--quality-filter` | flag | `False` | When quality eval is enabled, discard pairs that do not pass thresholds. |
+| `--min-faithfulness` | `float` | `0.80` | Minimum faithfulness score to accept a pair. |
+| `--min-relevancy` | `float` | `0.75` | Minimum answer relevancy score to accept a pair. |
+| `--min-roundtrip` | `float` | `0.75` | Minimum roundtrip consistency score to accept a pair. |
+
+## Generated pair schema
+
+Each pair is validated against the `QAPar` Pydantic model before being written to disk:
+
+| Field | Type | Description |
+|---|---|---|
+| `pregunta` | `str` | The clinical question in Spanish. Must be non-empty. |
+| `respuesta` | `str` | The answer in Spanish. Must be non-empty and supported by the source chunk. |
+| `tipo` | `TipoPregunta` | Question type — one of the six literals described below. |
+| `dificultad` | `NivelDificultad` | Difficulty level: `basico`, `intermedio`, or `avanzado`. |
+| `contexto_fuente` | `str` | A short excerpt (≤ 2 sentences) from the source chunk that directly supports the answer. |
+
+## Question types
+
+The `TipoPregunta` literal enforces six distinct question categories to ensure variety across the dataset:
+
+| Type | Literal value | Intent |
+|---|---|---|
+| Factual | `factual` | Extract concrete clinical facts from the source chunk. |
+| Reasoning | `razonamiento` | Connect evidence to a clinical decision or inference. |
+| Definition | `definicion` | Explain or define a medical concept. |
+| Comparison | `comparacion` | Contrast criteria, diagnoses, or clinical management approaches. |
+| Application | `aplicacion` | Resolve a brief clinical vignette (patient with condition X). |
+| Hypothetical | `hipotetico` | Explore a scenario conditioned on facts in the context. |
+
+## Difficulty levels
+
+The `NivelDificultad` literal encodes three levels:
+
+- **`basico`** — Straightforward recall or definition questions suitable for general comprehension.
+- **`intermedio`** — Questions requiring interpretation or application of clinical concepts.
+- **`avanzado`** — Complex reasoning, comparison, or hypothetical questions demanding deeper clinical knowledge.
+
+## Quality rules enforced
+
+The generation prompt enforces a strict set of rules that the model must follow. Pairs that violate these rules are expected to fail quality evaluation:
+
+- **No meta-references** — Questions and answers must not contain phrases like `"según el texto"`, `"según el fragmento"`, `"de acuerdo con el fragmento"`, `"con base en el texto"`, `"el fragmento dice"`, or any equivalent expression.
+- **No double questions** — Each question must have one central demand. Questions joined by `"y"`, `"además"`, or `"cuál es… y por qué…"` are split into separate pairs or discarded.
+- **Answer grounded in the chunk** — Every answer must be supportable by the source chunk. The model is instructed not to fabricate details beyond what the context provides.
+- **Self-contained questions** — Questions must be understandable without seeing the source chunk. The reader should not need the original document to interpret the question.
+- **Quality over quantity** — The model is instructed to generate only pairs the chunk supports well rather than filling the `max-pairs` target with low-quality items.
+
+## Resume from checkpoint
+
+If a run is interrupted, re-run the same command. The `--progress-file` checkpoint records every successfully processed `chunk_id`. On resume, the script:
+
+1. Reads the checkpoint to find already-processed IDs.
+2. Cross-checks against `--raw-output` to recover any IDs missing from the checkpoint.
+3. Skips all chunks already recorded, appending only new results.
+
+This makes resume idempotent — no pairs are duplicated and no completed work is discarded.
+
+## Output files
+
+Each run produces up to four files per split:
+
+- **`raw.jsonl`** — Flat audit records, one per pair. Contains all metadata fields including `faithfulness`, `answer_relevancy`, `roundtrip_consistency`, `quality_verdict`, and `quality_reason` when quality evaluation is enabled.
+- **`sft.jsonl`** — Conversational records in `{"messages": [...], "metadata": {...}}` format, ready for supervised fine-tuning with HuggingFace TRL or Unsloth.
+- **`progress.json`** — Checkpoint state listing processed `chunk_id` values.
+- **`generation_report.json`** — Per-split statistics including model names, chunk counts, pair counts, grounding overlap, and quality metrics.
+
+## Generate all three splits
+
+<CodeGroup>
+
+```bash Train
+python scripts/generate_synthetic_qa.py \
+  --input datasets/obstetrics/lm/train_lm.jsonl \
+  --raw-output datasets/obstetrics/qa/final/train/raw.jsonl \
+  --sft-output datasets/obstetrics/qa/final/train/sft.jsonl \
+  --progress-file datasets/obstetrics/qa/final/train/progress.json \
+  --report-output datasets/obstetrics/qa/final/train/generation_report.json \
+  --model gpt-5.4-mini \
+  --min-pairs 2 --max-pairs 5
+```
+
+```bash Validation
+python scripts/generate_synthetic_qa.py \
+  --input datasets/obstetrics/lm/validation_lm.jsonl \
+  --raw-output datasets/obstetrics/qa/final/validation/raw.jsonl \
+  --sft-output datasets/obstetrics/qa/final/validation/sft.jsonl \
+  --progress-file datasets/obstetrics/qa/final/validation/progress.json \
+  --report-output datasets/obstetrics/qa/final/validation/generation_report.json \
+  --model gpt-5.4-mini \
+  --min-pairs 2 --max-pairs 5
+```
+
+```bash Test
+python scripts/generate_synthetic_qa.py \
+  --input datasets/obstetrics/lm/test_lm.jsonl \
+  --raw-output datasets/obstetrics/qa/final/test/raw.jsonl \
+  --sft-output datasets/obstetrics/qa/final/test/sft.jsonl \
+  --progress-file datasets/obstetrics/qa/final/test/progress.json \
+  --report-output datasets/obstetrics/qa/final/test/generation_report.json \
+  --model gpt-5.4-mini \
+  --min-pairs 2 --max-pairs 5
+```
+
+</CodeGroup>

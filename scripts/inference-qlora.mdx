@@ -1,0 +1,82 @@
+---
+title: "inference_qlora.py — QLoRA Adapter Inference Script"
+sidebarTitle: "inference_qlora.py"
+description: "Run inference with a trained QLoRA adapter on the MaternaQA-es test set. Loads base model plus adapter and outputs predictions for evaluation."
+---
+
+`inference_qlora.py` loads a base model together with a trained QLoRA adapter produced by `train_qlora_trl.py` and runs it on the test split of MaternaQA-es. The output predictions can be compared against baseline predictions from `inference_base.py` and scored against reference answers using `evaluate_model_predictions.py`.
+
+## Usage
+
+```bash
+python scripts/inference_qlora.py \
+  --adapter-dir outputs/gemma4-grounded \
+  --output-prefix outputs/gemma4-grounded/test
+```
+
+```bash
+python scripts/inference_qlora.py \
+  --adapter-dir outputs/medgemma-grounded \
+  --output-prefix outputs/medgemma-grounded/test \
+  --limit 10
+```
+
+The output file is written to `<output-prefix>_predictions.jsonl`. For example, `--output-prefix outputs/gemma4-grounded/test` produces `outputs/gemma4-grounded/test_predictions.jsonl`.
+
+## CLI Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--adapter-dir` | `Path` | *(required)* | Directory containing `adapter_model.safetensors` and `adapter_config.json` saved by `train_qlora_trl.py`. |
+| `--dataset-variant` | `str` | `sft_grounded` | SFT variant to read the test split from. Choices: `sft_closed_book`, `sft_grounded`. |
+| `--output-prefix` | `Path` | *(required)* | Path prefix for the output file. The script appends `_predictions.jsonl` to produce the final filename. |
+| `--max-new-tokens` | `int` | `512` | Maximum number of new tokens the model may generate per prediction. |
+| `--temperature` | `float` | `0.7` | Sampling temperature. Only applied when `--do-sample` is set. |
+| `--top-p` | `float` | `0.9` | Nucleus sampling probability threshold. Only applied when `--do-sample` is set. |
+| `--do-sample` | flag | `False` | Use stochastic sampling. By default the script uses greedy decoding for reproducible evaluation. |
+| `--limit` | `int` | `None` | Maximum number of test examples to process. Useful for smoke tests. |
+| `--trust-remote-code` | flag | `False` | Pass `trust_remote_code=True` to model and tokenizer loaders. |
+| `--attn-implementation` | `str` | `None` | Optional attention backend override: `eager`, `sdpa`, `flash_attention_2`, etc. |
+| `--resume` | `bool` | `True` | Resume from an existing `<output-prefix>_predictions.jsonl`, skipping already-processed `qa_id`s. Use `--no-resume` to overwrite the file from scratch. |
+
+## How It Works
+
+1. **Reads adapter config** from `<adapter-dir>/adapter_config.json` to extract the `base_model_name_or_path` field. The base model identity is read from the saved adapter, so you do not need to specify it separately.
+2. **Loads the base model** in 4-bit NF4 quantization using `BitsAndBytesConfig` with `bnb_4bit_use_double_quant=True`. The compute dtype is `bfloat16` on Ampere+ GPUs and `float16` on older devices. The Gemma 4 / MedGemma architecture heuristic applies: model names containing `gemma-4` or `medgemma` are loaded with `AutoModelForImageTextToText`; all others use `AutoModelForCausalLM`.
+3. **Mounts the PEFT adapter** by calling `PeftModel.from_pretrained(base_model, adapter_dir)`, which layers the trained LoRA weights on top of the quantized base model.
+4. **Reads the test split** from `datasets/obstetrics/qa/publication/<dataset-variant>/test.jsonl`.
+5. **Builds a prompt** for each example using the tokenizer's chat template with `add_generation_prompt=True`, excluding the last assistant turn.
+6. **Generates predictions** using greedy decoding by default. Results are written incrementally and the run can be resumed safely.
+
+## Output File
+
+Each line in `<output-prefix>_predictions.jsonl` is a JSON object with the following fields:
+
+| Field | Description |
+|-------|-------------|
+| `id` | `qa_id` from dataset metadata, or sequential index as fallback |
+| `model_role` | Always `"qlora"` for predictions from this script |
+| `adapter_dir` | The value of `--adapter-dir` (string path) |
+| `dataset_variant` | The value of `--dataset-variant` |
+| `question` | Extracted question text |
+| `generated_answer` | The model's generated prediction |
+| `reference_answer` | The ground-truth answer from the test split |
+| `source_context` | Source context from `metadata.contexto_fuente` |
+| `prompt_text` | The full rendered prompt string sent to the model |
+| `metadata` | Full metadata dict from the original JSONL record |
+
+<Note>
+Pre-computed predictions from trained QLoRA adapters are available in the repository and can be evaluated directly without re-running inference:
+- `outputs/gemma4-grounded/test_predictions.jsonl`
+- `outputs/medgemma-grounded/test_predictions.jsonl`
+</Note>
+
+## After Inference
+
+Evaluate the generated predictions against the reference answers using `evaluate_model_predictions.py`:
+
+```bash
+python scripts/evaluate_model_predictions.py \
+  --input outputs/gemma4-grounded/test_predictions.jsonl \
+  --output outputs/gemma4-grounded/test_eval.json
+```

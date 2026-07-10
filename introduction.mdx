@@ -1,0 +1,95 @@
+---
+title: "MaternaQA-es: Spanish Maternal Healthcare Q&A Dataset"
+sidebarTitle: "Introduction"
+description: "MaternaQA-es is a 5,727-pair Spanish Q&A dataset for clinical NLP research, built from 63 obstetrics PDFs with full traceability to source documents."
+---
+
+MaternaQA-es is a public Spanish-language question-and-answer dataset purpose-built for clinical natural language processing research in the maternal health domain. Covering pregnancy, childbirth, postpartum recovery, and perinatal care, it consists of 5,727 synthetic Q&A pairs derived from 63 curated clinical PDFs — including clinical practice guidelines, care protocols, academic textbooks, and scientific articles in Spanish. Every pair is traceable to its source document, page range, and chunk, making the dataset equally suited to NLP researchers benchmarking language models, machine learning practitioners fine-tuning domain-specific assistants, and clinical AI developers building and evaluating retrieval-augmented generation (RAG) systems for Spanish-speaking communities.
+
+## What MaternaQA-es provides
+
+<CardGroup cols={2}>
+  <Card title="Q&A Dataset" icon="database">
+    **5,727 synthetic question-answer pairs** in Spanish, split into train (5,093), validation (306), and test (328) sets. Every pair carries full traceability metadata linking it back to its source PDF, pages, and text chunk.
+  </Card>
+  <Card title="LM Corpus" icon="books">
+    **2,223 audited clinical text chunks** derived from 63 obstetric PDFs across 5,176 clean pages. Each chunk includes topic annotations, clinical score, token estimate, and document-level split assignment to prevent data leakage.
+  </Card>
+  <Card title="Fine-tuning Scripts" icon="microchip">
+    **QLoRA training scripts** using TRL and PEFT, ready to fine-tune both **Gemma 4 E2B** and **MedGemma 1.5 4B** on the `sft_grounded` or `sft_closed_book` dataset variants. Includes smoke-test and full training commands.
+  </Card>
+  <Card title="Reproducible Pipeline" icon="arrow-progress">
+    An **8-step documented pipeline** covering source curation, PDF extraction, text cleaning, chunking, topic enrichment, synthetic Q&A generation, quality control with Ragas, and publication-ready export.
+  </Card>
+</CardGroup>
+
+## Dataset at a glance
+
+| Split      | Q&A Pairs | Source Chunks | Source PDFs |
+|:-----------|----------:|--------------:|------------:|
+| Train      | 5,093     | 1,744         | 52          |
+| Validation | 306       | 101           | 2           |
+| Test       | 328       | 108           | 3           |
+| **Total**  | **5,727** | **1,953**     | **57**      |
+
+Splits are assigned at the **document level**, so no PDF contributes chunks to more than one split. This design eliminates cross-split contamination and ensures that evaluation metrics reflect true out-of-distribution generalization.
+
+## Clinical topic coverage
+
+The dataset annotates each chunk and Q&A pair with one or more of 18 clinical topics drawn directly from the source literature:
+
+- `prenatal_care`
+- `postpartum`
+- `preterm_labor`
+- `labor_induction`
+- `vaginal_birth`
+- `cesarean`
+- `hemorrhage`
+- `preeclampsia`
+- `diabetes_gestational`
+- `infection`
+- `fetal_monitoring`
+- `newborn_care`
+- `ultrasound`
+- `genetics`
+- `contraception`
+- `infertility`
+- `menopause`
+- `gynecologic_oncology`
+
+Topic annotations are stored in each record's `topics` field, enabling stratified sampling, topic-level evaluation, and targeted dataset subsets for specialized fine-tuning.
+
+## Question types
+
+MaternaQA-es contains questions across six cognitive types to ensure broad coverage of clinical reasoning complexity, from direct fact recall to open-ended hypothetical reasoning:
+
+| Type           | Intent                                                                  |
+|:---------------|:------------------------------------------------------------------------|
+| `factual`      | Retrieve specific clinical information from the source material.        |
+| `definicion`   | Explain a concept, condition, or clinical procedure.                    |
+| `comparacion`  | Differentiate between clinical entities or management decisions.        |
+| `razonamiento` | Justify causal relationships, risks, or evidence-based recommendations. |
+| `aplicacion`   | Apply domain knowledge to a described clinical situation.               |
+| `hipotetico`   | Explore conditional scenarios or case variants.                         |
+
+## Ethical considerations
+
+<Warning>
+  **MaternaQA-es is a research resource, not a clinical decision-making tool.** All question-answer pairs are synthetically generated from clinical documents and must be interpreted as training and evaluation data — not as direct medical recommendations or validated clinical guidance.
+
+  Before using any model fine-tuned on this dataset in a real-world healthcare setting, **independent clinical validation by qualified professionals is required**. The traceability metadata (`source_pdf`, `pages`, `chunk_id`) is provided to support auditing and review, but does not substitute for expert clinical judgment.
+</Warning>
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install dependencies, load a dataset split, and run a QLoRA fine-tuning smoke test in under 10 minutes.
+  </Card>
+  <Card title="Dataset Overview" icon="table" href="/dataset/overview">
+    Explore the dataset schema, field descriptions, metadata fields, and all three publication variants in detail.
+  </Card>
+  <Card title="Pipeline Overview" icon="diagram-project" href="/pipeline/overview">
+    Walk through the full 8-step reproducible construction pipeline from raw PDFs to publication-ready Q&A pairs.
+  </Card>
+</CardGroup>
