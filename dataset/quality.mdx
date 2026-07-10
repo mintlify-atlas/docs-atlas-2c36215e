@@ -1,5 +1,5 @@
 ---
-title: "MaternaQA-es Quality Evaluation and Ragas Metrics"
+title: "MaternaQA-es Quality Evaluation: Ragas Scores and Grounding"
 sidebarTitle: "Quality"
 description: "MaternaQA-es quality results: Ragas faithfulness and answer relevancy scores, grounding statistics, and question-type distribution by split."
 ---
@@ -23,7 +23,7 @@ Stratified sampling was used to ensure that the evaluated sample is representati
 Source-context grounding is tracked separately from Ragas scores to quantify how tightly answers are anchored to their originating chunks:
 
 - Average context-answer overlap across the full dataset: **0.6836**
-- Pairs flagged as low-grounding: **27** (0.54 % of the total 5,727 pairs)
+- Pairs flagged as low-grounding: **27** (0.54 % of the 5,015 train pairs evaluated for grounding)
 
 The low rate of low-grounding flags confirms that the generation pipeline successfully produced answers derived from — rather than extrapolated beyond — the source clinical text.
 

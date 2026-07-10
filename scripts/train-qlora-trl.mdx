@@ -1,7 +1,7 @@
 ---
 title: "train_qlora_trl.py — QLoRA Fine-tuning with TRL and PEFT"
-sidebarTitle: "train_qlora_trl.py"
-description: "Fine-tune Gemma 4 or MedGemma 1.5 4B on MaternaQA-es with QLoRA using TRL and PEFT. Full CLI reference with all flags, defaults, and training configuration."
+sidebarTitle: "QLoRA Training"
+description: "Fine-tune Gemma 4 or MedGemma 1.5 4B on MaternaQA-es with QLoRA using TRL and PEFT. Full CLI reference with all flags and training defaults."
 ---
 
 `train_qlora_trl.py` is the canonical QLoRA training script for MaternaQA-es. It uses TRL's `SFTTrainer` with PEFT LoRA and bitsandbytes 4-bit quantization. The script converts conversational JSONL to prompt/completion format in memory, computing loss only over the completion. This keeps loss masking explicit and avoids depending on model-specific chat templates that may not expose assistant masks.

@@ -1,7 +1,7 @@
 ---
 title: "Fine-tuning MaternaQA-es with QLoRA: Getting Started"
 sidebarTitle: "Quickstart"
-description: "Start fine-tuning Gemma 4 or MedGemma 1.5 4B on MaternaQA-es with QLoRA in under 5 minutes using the smoke test workflow."
+description: "Validate your MaternaQA-es QLoRA setup in under 5 minutes with a smoke test using Gemma 4 E2B or MedGemma 1.5 4B IT on 16 GB VRAM."
 ---
 
 MaternaQA-es ships a ready-to-use QLoRA training script (`train_qlora_trl.py`) that works with Gemma 4 E2B and MedGemma 1.5 4B IT. The recommended starting point is a smoke test that validates the full load → train → save cycle before committing to a full training run. The smoke test runs 10 steps with a tiny slice of the dataset so you can confirm that model loading, LoRA adapter creation, and checkpoint saving all work correctly on your hardware before investing hours of GPU time.

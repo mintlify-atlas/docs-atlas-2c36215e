@@ -1,7 +1,7 @@
 ---
 title: "evaluate_model_predictions.py — Model Prediction Evaluator"
-sidebarTitle: "evaluate_model_predictions.py"
-description: "Score model predictions against MaternaQA-es reference answers and source context. Outputs per-sample metrics and aggregate evaluation reports in JSON and CSV."
+sidebarTitle: "Evaluate Predictions"
+description: "Score model predictions against MaternaQA-es reference answers using Ragas. Outputs per-sample metrics and aggregate evaluation reports in JSON and CSV."
 ---
 
 `evaluate_model_predictions.py` takes a JSONL predictions file from `inference_base.py` or `inference_qlora.py` and evaluates each prediction against the reference answer and source context from the test split. It produces both a per-sample scored JSONL and an aggregate summary JSON, which can then be exported to CSV for cross-model comparison using `convert_eval_to_csv.py`.

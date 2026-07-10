@@ -1,7 +1,7 @@
 ---
-title: "generate_synthetic_qa.py — Synthetic Q&A Generation Script"
-sidebarTitle: "generate_synthetic_qa.py"
-description: "Generate Spanish clinical Q&A pairs from LM corpus chunks using OpenAI Structured Outputs. Supports async generation, checkpoint resume, and six question types."
+title: "generate_synthetic_qa.py — Synthetic Q&A Generation"
+sidebarTitle: "Generate Synthetic QA"
+description: "Generate Spanish clinical Q&A pairs from corpus chunks via OpenAI Structured Outputs. Supports async generation, checkpoint resume, and six question types."
 ---
 
 `generate_synthetic_qa.py` takes LM corpus chunks and generates Spanish clinical Q&A pairs using OpenAI Structured Outputs. It runs asynchronously with a configurable semaphore, writes incremental checkpoints for safe resume, and produces both a raw auditable JSONL and an SFT-ready messages-format JSONL.

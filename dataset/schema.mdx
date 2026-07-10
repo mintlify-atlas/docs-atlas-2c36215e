@@ -1,7 +1,7 @@
 ---
-title: "MaternaQA-es JSONL Schema and Field Reference"
+title: "MaternaQA-es JSONL Schema and Complete Field Reference"
 sidebarTitle: "Schema"
-description: "Complete field reference for MaternaQA-es JSONL records across sft_grounded, sft_closed_book, and qa_flat_jsonl dataset variants."
+description: "Detailed JSONL field reference for all three MaternaQA-es publication variants: sft_grounded, sft_closed_book, and qa_flat_jsonl formats."
 ---
 
 MaternaQA-es is distributed as three JSONL variants that share the same underlying content but expose it in different structures. The two SFT variants — `sft_grounded` and `sft_closed_book` — use the standard chat `messages` array format, making them directly compatible with training frameworks that accept conversational data. The `qa_flat_jsonl` variant stores every field as a top-level key, giving full access to provenance and quality metadata without unpacking nested objects. All three variants omit the operational judge quality metric fields (`faithfulness`, `answer_relevancy`, `roundtrip_consistency`, `quality_verdict`, `quality_reason`) that appear in the raw generation artifacts.
@@ -68,6 +68,10 @@ Both `sft_grounded` and `sft_closed_book` records share this top-level structure
 
 <ParamField body="metadata.clinical_score" type="integer">
   Quality score assigned to the chunk during corpus construction. Higher values indicate more clinically dense and useful content.
+</ParamField>
+
+<ParamField body="metadata.contexto_fuente" type="string">
+  The source chunk text that grounds the Q&A pair. Present in both `sft_grounded` and `sft_closed_book` metadata records. In `sft_grounded`, this same text is also embedded in the `user` message turn; in `sft_closed_book`, it is carried in metadata only and not shown to the model at inference time.
 </ParamField>
 
 <ParamField body="metadata.split" type="string">

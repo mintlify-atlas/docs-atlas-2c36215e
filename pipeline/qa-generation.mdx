@@ -1,7 +1,7 @@
 ---
 title: "Synthetic Q&A Generation from Clinical Text Chunks"
 sidebarTitle: "QA Generation"
-description: "Generate Spanish clinical Q&A pairs from corpus chunks using OpenAI structured outputs, with question types, difficulty levels, and operational quality filtering."
+description: "Generates Spanish clinical Q&A pairs from corpus chunks with OpenAI structured outputs, six question types, and operational quality filtering."
 ---
 
 `generate_synthetic_qa.py` uses **OpenAI Structured Outputs** to produce clinically-grounded Spanish Q&A pairs from LM corpus chunks. The async pipeline processes all eligible chunks concurrently and writes resumable checkpoints after each chunk, so interrupted runs can continue exactly where they left off without duplicating API calls or overwriting completed work.

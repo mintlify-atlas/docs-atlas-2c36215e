@@ -1,5 +1,5 @@
 ---
-title: "QLoRA Training with TRL, PEFT, and bitsandbytes"
+title: "MaternaQA-es QLoRA Training: TRL, PEFT, and bitsandbytes"
 sidebarTitle: "Training"
 description: "Run full QLoRA fine-tuning on MaternaQA-es using TRL and PEFT. Covers model selection, dataset variants, hyperparameters, and saving LoRA adapters."
 ---
@@ -56,7 +56,6 @@ The script ships with conservative defaults tuned for a 16 GB VRAM workstation. 
 | `--lora-alpha` | `16` | LoRA scaling factor |
 | `--lora-dropout` | `0.05` | Dropout applied inside LoRA layers |
 | `--max-length` | `1024` | Maximum token length per training example |
-| `--quantization` | 4-bit NF4 | bitsandbytes double-quantization with NF4 data type |
 | `--warmup-ratio` | `0.03` | Fraction of steps used for learning rate warm-up |
 | `--max-grad-norm` | `0.3` | Gradient clipping threshold |
 | `--seed` | `3407` | Random seed for reproducibility |
